@@ -149,6 +149,10 @@ h1 {
 }
 
 @media (max-width: 480px) {
+  .masthead {
+    flex-wrap: wrap;
+  }
+
   .masthead .rooted {
     gap: var(--a-sprout);
   }
