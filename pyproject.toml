@@ -1,0 +1,33 @@
+[build-system]
+requires = ["maturin>=1.7,<2"]
+build-backend = "maturin"
+
+[project]
+name = "silvic"
+description = "LightGBM-compatible gradient boosting on CPU, Metal and CUDA, single-node or distributed on Ray"
+requires-python = ">=3.10"
+keywords = ["lightgbm", "gbdt", "lambdarank", "ray", "gpu"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Rust",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+]
+dependencies = ["numpy"]
+dynamic = ["version"]
+
+[project.optional-dependencies]
+ray = ["ray[default]>=2.40", "pyarrow"]
+pandas = ["pandas"]
+sklearn = ["scikit-learn"]
+lightgbm = ["lightgbm"]
+test = ["pytest", "pandas", "pyarrow", "scikit-learn", "lightgbm", "ray[default]>=2.40"]
+
+[tool.maturin]
+python-source = "python"
+module-name = "silvic._silvic"
+manifest-path = "crates/silvic-python/Cargo.toml"
+features = ["pyo3/extension-module"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests/python"]

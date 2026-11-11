@@ -1,0 +1,29 @@
+[package]
+name = "silvic-python"
+description = "Python bindings of silvic (the silvic._silvic extension module)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+readme = "README.md"
+keywords = ["lightgbm", "gbdt", "python", "ray"]
+
+[lib]
+name = "_silvic"
+crate-type = ["cdylib"]
+
+[dependencies]
+silvic-core = { workspace = true }
+silvic-net = { workspace = true }
+pyo3 = { workspace = true }
+numpy = { workspace = true }
+serde_json = { workspace = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+silvic-gpu = { workspace = true, features = ["metal"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+silvic-gpu = { workspace = true, features = ["cuda"] }
+
+[lints]
+workspace = true
