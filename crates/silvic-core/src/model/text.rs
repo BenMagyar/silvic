@@ -264,8 +264,10 @@ impl Header {
             return Err(SilvicError::unsupported("average_output (random forest) models"));
         }
         let max_feature_idx: i64 = parse_number(require("max_feature_idx")?, "max_feature_idx")?;
-        let num_features = usize::try_from(max_feature_idx + 1)
-            .map_err(|_| SilvicError::model(format!("max_feature_idx={max_feature_idx}")))?;
+        let num_features = max_feature_idx
+            .checked_add(1)
+            .and_then(|value| usize::try_from(value).ok())
+            .ok_or_else(|| SilvicError::model(format!("max_feature_idx={max_feature_idx}")))?;
         let objective = parse_objective(get("objective").ok_or_else(|| {
             SilvicError::unsupported("models without an objective (trained with a custom objective)")
         })?)?;
@@ -438,8 +440,11 @@ fn parse_tree(fields: &TreeFields<'_>, num_features: usize) -> Result<Tree> {
     tree.leaf_count = fields.list_or_default("leaf_count", num_leaves)?;
     tree.decision_type = fields.list_or_default("decision_type", nodes)?;
     if num_cat > 0 {
-        tree.cat_boundaries = fields.list("cat_boundaries", num_cat + 1)?;
-        let words = usize::try_from(*tree.cat_boundaries.last().expect("num_cat + 1 > 0 boundaries"))
+        let boundaries = num_cat
+            .checked_add(1)
+            .ok_or_else(|| SilvicError::model(format!("num_cat={num_cat}")))?;
+        tree.cat_boundaries = fields.list("cat_boundaries", boundaries)?;
+        let words = usize::try_from(*tree.cat_boundaries.last().expect("boundaries is nonzero"))
             .map_err(|_| SilvicError::model("negative cat_boundaries"))?;
         tree.cat_threshold = fields.list("cat_threshold", words)?;
     }
@@ -660,6 +665,8 @@ mod tests {
             ("sigmoid:1", "sigmoid:0"),
             ("[boosting: gbdt]", "boosting: gbdt"),
             ("max_feature_idx=2", "max_feature_idx=3"),
+            ("max_feature_idx=2", "max_feature_idx=9223372036854775807"),
+            ("num_cat=0", "num_cat=18446744073709551615"),
         ] {
             assert!(text.contains(from), "{from}");
             let error = Model::from_lightgbm_string(&text.replacen(from, to, 1)).expect_err(to);

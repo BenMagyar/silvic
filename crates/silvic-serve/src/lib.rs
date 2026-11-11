@@ -13,9 +13,17 @@
 //!
 //! Trees with more than 256 leaves, NaN thresholds, or categorical splits on a feature with more than 64 distinct
 //! category behaviours are walked node by node with `silvic_core`'s decisions instead, so every model scores.
+//!
+//! With the `cuda` feature, `CudaPredictor` preserves these exact f64 scores on CUDA;
+//! `CudaPredictorF32` explicitly opts into approximate f32 inputs, model storage, arithmetic and output.
 
 mod compile;
+#[cfg(feature = "cuda")]
+mod cuda;
 mod kernel;
 mod predictor;
 
 pub use predictor::{Kernel, Predictor};
+
+#[cfg(feature = "cuda")]
+pub use cuda::{cuda_is_available, CudaPredictor, CudaPredictorF32};

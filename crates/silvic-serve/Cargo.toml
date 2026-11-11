@@ -8,9 +8,14 @@ publish.workspace = true
 readme = "README.md"
 keywords = ["lightgbm", "gbdt", "inference", "quickscorer", "simd"]
 
+[features]
+cuda = ["dep:silvic-gpu", "dep:bytemuck", "silvic-gpu/cuda"]
+
 [dependencies]
 silvic-core = { workspace = true }
 rayon = { workspace = true }
+silvic-gpu = { workspace = true, optional = true }
+bytemuck = { workspace = true, optional = true }
 
 [dev-dependencies]
 criterion = { workspace = true }

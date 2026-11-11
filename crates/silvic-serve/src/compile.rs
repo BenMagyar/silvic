@@ -298,16 +298,16 @@ fn bitset(tree: &Tree, node: usize) -> &[u32] {
 
 /// A tree's reachable nodes in left-to-right leaf order, checked so every later index is in bounds.
 #[derive(Debug, Clone, Default)]
-struct Shape {
+pub(crate) struct Shape {
     /// Leaf indices, left to right.
     leaves: Vec<usize>,
     /// Reachable internal nodes with the left-to-right positions `[start, end)` of their left subtree's leaves.
-    nodes: Vec<(usize, u32, u32)>,
+    pub(crate) nodes: Vec<(usize, u32, u32)>,
 }
 
 impl Shape {
     /// Walks the tree from node 0, failing on anything `Tree::GetLeaf` would index out of bounds or loop on.
-    fn of(tree: &Tree, num_features: usize) -> std::result::Result<Shape, String> {
+    pub(crate) fn of(tree: &Tree, num_features: usize) -> std::result::Result<Shape, String> {
         if tree.leaf_value.is_empty() {
             return Err("no leaf values".into());
         }
@@ -328,41 +328,42 @@ impl Shape {
         if arrays.iter().any(|&len| len < nodes) || tree.leaf_value.len() < tree.num_leaves {
             return Err(format!("node arrays shorter than num_leaves={}", tree.num_leaves));
         }
+        enum Step {
+            Visit(i32),
+            LeftEnd(usize),
+        }
         let mut shape = Shape::default();
         let mut seen = vec![false; nodes];
-        shape.visit(tree, num_features, 0, &mut seen)?;
-        Ok(shape)
-    }
-
-    /// Lays out the subtree under `child` (a node index, or `~leaf`); returns its leaves' positions.
-    fn visit(
-        &mut self,
-        tree: &Tree,
-        num_features: usize,
-        child: i32,
-        seen: &mut [bool],
-    ) -> std::result::Result<(u32, u32), String> {
-        if child < 0 {
-            let leaf = !child as usize;
-            if leaf >= tree.num_leaves {
-                return Err(format!("child {child} names leaf {leaf} of {}", tree.num_leaves));
+        let mut stack = vec![Step::Visit(0)];
+        while let Some(step) = stack.pop() {
+            let child = match step {
+                Step::Visit(child) => child,
+                Step::LeftEnd(slot) => {
+                    shape.nodes[slot].2 = shape.leaves.len() as u32;
+                    continue;
+                }
+            };
+            if child < 0 {
+                let leaf = !child as usize;
+                if leaf >= tree.num_leaves {
+                    return Err(format!("child {child} names leaf {leaf} of {}", tree.num_leaves));
+                }
+                shape.leaves.push(leaf);
+                continue;
             }
-            let position = self.leaves.len() as u32;
-            self.leaves.push(leaf);
-            return Ok((position, position + 1));
+            let node = child as usize;
+            if node >= seen.len() || seen[node] {
+                return Err(format!("node {node} is out of range or reached twice"));
+            }
+            seen[node] = true;
+            check_node(tree, num_features, node)?;
+            let slot = shape.nodes.len();
+            shape.nodes.push((node, shape.leaves.len() as u32, 0));
+            stack.push(Step::Visit(tree.right_child[node]));
+            stack.push(Step::LeftEnd(slot));
+            stack.push(Step::Visit(tree.left_child[node]));
         }
-        let node = child as usize;
-        if node >= seen.len() || seen[node] {
-            return Err(format!("node {node} is out of range or reached twice"));
-        }
-        seen[node] = true;
-        check_node(tree, num_features, node)?;
-        let slot = self.nodes.len();
-        self.nodes.push((node, 0, 0));
-        let (start, left_end) = self.visit(tree, num_features, tree.left_child[node], seen)?;
-        let (_, end) = self.visit(tree, num_features, tree.right_child[node], seen)?;
-        self.nodes[slot] = (node, start, left_end);
-        Ok((start, end))
+        Ok(shape)
     }
 }
 

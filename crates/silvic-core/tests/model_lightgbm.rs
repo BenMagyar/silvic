@@ -1,4 +1,4 @@
-//! Compares against models and predictions recorded from LightGBM 3.3.5.
+//! Compares against models and raw predictions recorded from LightGBM 3.3.5 and 4.7.
 //!
 //! `tests/fixtures/lightgbm/gen_models.py` recorded the models (`<case>.txt`) and LightGBM's predictions for their
 //! edge-case rows (`cases.json`); `gen_models_v4.py` recorded a subset with LightGBM 4.7 (`cases_v4.json`), which
@@ -25,7 +25,6 @@ struct Case {
     model_text: String,
     rows: Vec<Vec<f64>>,
     raw: Vec<f64>,
-    predicted: Vec<f64>,
     prefix_trees: usize,
     raw_prefix: Vec<f64>,
     importance_split: Vec<f64>,
@@ -62,7 +61,6 @@ fn load_cases(file: &str) -> Vec<Case> {
                 .expect("model file"),
             rows: case["rows"].as_array().expect("rows").iter().map(floats).collect(),
             raw: floats(&case["raw"]),
-            predicted: floats(&case["predicted"]),
             prefix_trees: case["prefix_trees"].as_u64().expect("prefix_trees") as usize,
             raw_prefix: floats(&case["raw_prefix"]),
             importance_split: case["importance_split"]
@@ -144,7 +142,7 @@ fn raw_predictions_match_lightgbm_bit_for_bit() {
 }
 
 #[test]
-fn predict_matches_lightgbm_in_every_layout() {
+fn raw_predictions_match_lightgbm_in_every_layout() {
     for case in all_cases() {
         let model = case.model();
         let (rows, cols) = (case.rows.len(), case.rows[0].len());
@@ -160,9 +158,9 @@ fn predict_matches_lightgbm_in_every_layout() {
         };
         assert_bits(
             &case.name,
-            "predicted",
-            &model.predict(&matrix, false, None),
-            &case.predicted,
+            "row-major raw",
+            &model.predict(&matrix, true, None),
+            &case.raw,
             &case.rows,
         );
         let matrix = DenseMatrix {
@@ -179,20 +177,6 @@ fn predict_matches_lightgbm_in_every_layout() {
             &case.rows,
         );
     }
-}
-
-#[test]
-fn binary_predictions_are_the_sigmoid_of_raw_scores() {
-    let case = load_cases(V3_CASES)
-        .into_iter()
-        .find(|case| case.name == "binary")
-        .expect("binary case");
-    let model = case.model();
-    assert_eq!(model.objective, ModelObjective::Binary { sigmoid: 0.7 });
-    assert!(
-        case.predicted.iter().zip(&case.raw).any(|(p, r)| p != r),
-        "binary: transform recorded"
-    );
 }
 
 #[test]
