@@ -1,0 +1,11 @@
+/target/
+/.venv/
+/.venv-lgb3/
+__pycache__/
+*.so
+*.pyc
+.pytest_cache/
+.DS_Store
+.idea/
+/bench/data/
+/docs/.hallmark/

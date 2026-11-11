@@ -1,0 +1,29 @@
+[package]
+name = "silvic-net"
+description = "TCP ring collectives (allreduce, allgather) for distributed silvic training"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+readme = "README.md"
+keywords = ["allreduce", "collective", "distributed", "gbdt"]
+
+[dependencies]
+silvic-core = { workspace = true }
+tracing = { workspace = true }
+bytemuck = { workspace = true }
+libc = { workspace = true }
+
+[dev-dependencies]
+criterion = { workspace = true }
+
+[lib]
+# `cargo bench` arguments are criterion's: the lib's libtest bench harness, with no benches, would reject them.
+bench = false
+
+[[bench]]
+name = "allreduce"
+harness = false
+
+[lints]
+workspace = true

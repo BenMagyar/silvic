@@ -1,0 +1,13 @@
+{
+  "lightgbm_version": "4.7.0",
+  "rows": 100000,
+  "features": 50,
+  "queries": 1000,
+  "valid_rows": 20000,
+  "valid_queries": 200,
+  "iterations": 100,
+  "ndcg@10": {
+    "quantized": 0.9614163962674932,
+    "float": 0.9640897839534817
+  }
+}
