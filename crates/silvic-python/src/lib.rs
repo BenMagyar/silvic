@@ -25,5 +25,6 @@ fn _silvic(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(collective::connect, module)?)?;
     module.add_class::<serve::Predictor>()?;
     module.add_function(wrap_pyfunction!(serve::available_kernels, module)?)?;
+    module.add_function(wrap_pyfunction!(serve::available_serving_devices, module)?)?;
     Ok(())
 }

@@ -28,14 +28,19 @@ def _train_case(name, **extra):
     group = data[2] if len(data) > 2 else None
     params = {**BASE_PARAMS, **objective, **extra}
     train_set = silvic.Dataset(X, label=y, group=group)
-    booster = silvic.train(params, train_set, num_boost_round=ROUNDS, verbose_eval=False)
+    booster = silvic.train(
+        params, train_set, num_boost_round=ROUNDS, verbose_eval=False
+    )
     return booster, X, y
 
 
 def test_regression_learns(regression):
     X, y = regression
     booster = silvic.train(
-        {**BASE_PARAMS, "objective": "regression"}, silvic.Dataset(X, label=y), ROUNDS, verbose_eval=False
+        {**BASE_PARAMS, "objective": "regression"},
+        silvic.Dataset(X, label=y),
+        ROUNDS,
+        verbose_eval=False,
     )
     assert booster.num_trees() == ROUNDS
     prediction = booster.predict(X)
@@ -46,7 +51,9 @@ def test_regression_learns(regression):
 def test_binary_probabilities(binary):
     X, y = binary
     params = {**BASE_PARAMS, "objective": "binary"}
-    booster = silvic.train(params, silvic.Dataset(X, label=y), ROUNDS, verbose_eval=False)
+    booster = silvic.train(
+        params, silvic.Dataset(X, label=y), ROUNDS, verbose_eval=False
+    )
     probability = booster.predict(X)
     raw = booster.predict(X, raw_score=True)
     assert np.all((probability > 0) & (probability < 1))
@@ -74,15 +81,21 @@ def test_lambdarank_ranks(ranking):
 
 @pytest.mark.parametrize("name", sorted(CASES))
 def test_predict_equals_lightgbm(name):
-    booster, X, _ = _train_case(name, bagging_fraction=0.8, bagging_freq=2, feature_fraction=0.9)
+    booster, X, _ = _train_case(
+        name, bagging_fraction=0.8, bagging_freq=2, feature_fraction=0.9
+    )
     reference = lightgbm.Booster(model_str=booster.model_to_string())
     assert reference.num_trees() == booster.num_trees()
     np.testing.assert_array_equal(booster.predict(X), reference.predict(X))
-    np.testing.assert_array_equal(booster.predict(X, raw_score=True), reference.predict(X, raw_score=True))
+    np.testing.assert_array_equal(
+        booster.predict(X, raw_score=True), reference.predict(X, raw_score=True)
+    )
     np.testing.assert_array_equal(
         booster.predict(X, num_iteration=5), reference.predict(X, num_iteration=5)
     )
-    np.testing.assert_array_equal(booster.to_lightgbm().predict(X), reference.predict(X))
+    np.testing.assert_array_equal(
+        booster.to_lightgbm().predict(X), reference.predict(X)
+    )
 
 
 def test_training_is_reproducible():
@@ -107,13 +120,22 @@ def test_continued_training_equals_one_run(ranking, tmp_path):
     def fit(rounds, init_model=None, callbacks=None):
         train_set = silvic.Dataset(X, label=y, group=group)
         return silvic.train(
-            dict(CONTINUE_PARAMS), train_set, rounds, init_model=init_model, callbacks=callbacks, verbose_eval=False
+            dict(CONTINUE_PARAMS),
+            train_set,
+            rounds,
+            init_model=init_model,
+            callbacks=callbacks,
+            verbose_eval=False,
         )
 
     whole = fit(30)
     first = fit(20)
     seen = []
-    continued = fit(10, init_model=first, callbacks=[lambda env: seen.append((env.iteration, env.end_iteration))])
+    continued = fit(
+        10,
+        init_model=first,
+        callbacks=[lambda env: seen.append((env.iteration, env.end_iteration))],
+    )
     assert continued.num_trees() == 30
     assert continued.model_to_string() == whole.model_to_string()
     assert seen == [(i, 30) for i in range(20, 30)]
@@ -121,7 +143,10 @@ def test_continued_training_equals_one_run(ranking, tmp_path):
     first.save_model(path)
     assert fit(10, init_model=path).model_to_string() == whole.model_to_string()
     assert fit(10, init_model=str(path)).model_to_string() == whole.model_to_string()
-    assert fit(10, init_model=first.model_to_string()).model_to_string() == whole.model_to_string()
+    assert (
+        fit(10, init_model=first.model_to_string()).model_to_string()
+        == whole.model_to_string()
+    )
 
 
 def test_continued_training_records_its_iterations(ranking):
@@ -147,13 +172,21 @@ def test_init_model_with_other_objective_raises(ranking):
     regression = silvic.train(params, silvic.Dataset(X, label=y), 2, verbose_eval=False)
     ranking_set = silvic.Dataset(X, label=y, group=group)
     with pytest.raises(ValueError):
-        silvic.train(dict(CONTINUE_PARAMS), ranking_set, 2, init_model=regression, verbose_eval=False)
+        silvic.train(
+            dict(CONTINUE_PARAMS),
+            ranking_set,
+            2,
+            init_model=regression,
+            verbose_eval=False,
+        )
 
 
 def test_sklearn_init_model(ranking):
     X, y, group = ranking
     first = silvic.SilvicRanker(n_estimators=5, verbosity=-1).fit(X, y, group=group)
-    second = silvic.SilvicRanker(n_estimators=3, verbosity=-1).fit(X, y, group=group, init_model=first)
+    second = silvic.SilvicRanker(n_estimators=3, verbosity=-1).fit(
+        X, y, group=group, init_model=first
+    )
     assert second.booster_.num_trees() == 8
 
 
@@ -173,32 +206,50 @@ def test_pandas_categorical():
     rows = 3000
     colour = pd.Categorical(rng.choice(["red", "green", "blue", "teal"], size=rows))
     numeric = rng.normal(size=rows)
-    effect = pd.Series(colour).map({"red": 3.0, "green": -1.0, "blue": 0.5, "teal": 0.0}).to_numpy(float)
+    effect = (
+        pd.Series(colour)
+        .map({"red": 3.0, "green": -1.0, "blue": 0.5, "teal": 0.0})
+        .to_numpy(float)
+    )
     frame = pd.DataFrame({"colour": colour, "x": numeric})
     y = effect + numeric + rng.normal(scale=0.1, size=rows)
     booster = silvic.train(
-        {**BASE_PARAMS, "objective": "regression"}, silvic.Dataset(frame, label=y), ROUNDS, verbose_eval=False
+        {**BASE_PARAMS, "objective": "regression"},
+        silvic.Dataset(frame, label=y),
+        ROUNDS,
+        verbose_eval=False,
     )
     model_str = booster.model_to_string()
-    assert model_str.rstrip("\n").splitlines()[-1] == 'pandas_categorical:[["blue", "green", "red", "teal"]]'
+    assert (
+        model_str.rstrip("\n").splitlines()[-1]
+        == 'pandas_categorical:[["blue", "green", "red", "teal"]]'
+    )
     assert booster.feature_name() == ["colour", "x"]
     assert booster.pandas_categorical == [["blue", "green", "red", "teal"]]
     # Categories listed in another order map back to the training codes.
-    reordered = frame.assign(colour=frame["colour"].cat.reorder_categories(["teal", "red", "green", "blue"]))
+    reordered = frame.assign(
+        colour=frame["colour"].cat.reorder_categories(["teal", "red", "green", "blue"])
+    )
     np.testing.assert_array_equal(booster.predict(reordered), booster.predict(frame))
-    np.testing.assert_array_equal(booster.predict(frame), booster.to_lightgbm().predict(frame))
+    np.testing.assert_array_equal(
+        booster.predict(frame), booster.to_lightgbm().predict(frame)
+    )
     assert np.mean((booster.predict(frame) - y) ** 2) < 0.1 * np.var(y)
 
 
 def test_numpy_model_ends_with_null_pandas_categorical(regression):
     X, y = regression
-    booster = silvic.train({**BASE_PARAMS}, silvic.Dataset(X, label=y), 2, verbose_eval=False)
+    booster = silvic.train(
+        {**BASE_PARAMS}, silvic.Dataset(X, label=y), 2, verbose_eval=False
+    )
     assert booster.model_to_string().endswith("\npandas_categorical:null\n")
 
 
 def test_sklearn_regressor_and_classifier(regression, binary):
     X, y = regression
-    regressor = silvic.SilvicRegressor(n_estimators=ROUNDS, num_leaves=15, verbosity=-1).fit(X, y)
+    regressor = silvic.SilvicRegressor(
+        n_estimators=ROUNDS, num_leaves=15, verbosity=-1
+    ).fit(X, y)
     assert regressor.n_features_in_ == NUM_FEATURES
     assert regressor.feature_importances_.shape == (NUM_FEATURES,)
     assert regressor.feature_importances_.dtype == np.int32
@@ -207,7 +258,9 @@ def test_sklearn_regressor_and_classifier(regression, binary):
 
     X, y = binary
     labels = np.where(y > 0.5, "yes", "no")
-    classifier = silvic.SilvicClassifier(n_estimators=ROUNDS, verbosity=-1, subsample=0.8, bagging_fraction=0.7)
+    classifier = silvic.SilvicClassifier(
+        n_estimators=ROUNDS, verbosity=-1, subsample=0.8, bagging_fraction=0.7
+    )
     classifier.fit(X, labels, eval_set=[(X, labels)])
     assert list(classifier.classes_) == ["no", "yes"]
     proba = classifier.predict_proba(X)
@@ -221,11 +274,24 @@ def test_sklearn_regressor_and_classifier(regression, binary):
 
 def test_sklearn_ranker_with_groups(ranking):
     X, y, group = ranking
-    ranker = silvic.SilvicRanker(n_estimators=ROUNDS, num_leaves=15, min_child_samples=10, verbosity=-1)
-    ranker.fit(X, y, group=group, eval_set=[(X, y)], eval_group=[group], eval_at=[1, 5], eval_names=["train"])
+    ranker = silvic.SilvicRanker(
+        n_estimators=ROUNDS, num_leaves=15, min_child_samples=10, verbosity=-1
+    )
+    ranker.fit(
+        X,
+        y,
+        group=group,
+        eval_set=[(X, y)],
+        eval_group=[group],
+        eval_at=[1, 5],
+        eval_names=["train"],
+    )
     assert sorted(ranker.evals_result_["train"]) == ["ndcg@1", "ndcg@5"]
     assert len(ranker.evals_result_["train"]["ndcg@5"]) == ROUNDS
-    assert ranker.best_score_["train"]["ndcg@5"] == ranker.evals_result_["train"]["ndcg@5"][-1]
+    assert (
+        ranker.best_score_["train"]["ndcg@5"]
+        == ranker.evals_result_["train"]["ndcg@5"][-1]
+    )
     assert ranker.predict(X).shape == (len(y),)
     reference = lightgbm.Booster(model_str=ranker.booster_.model_to_string())
     np.testing.assert_array_equal(ranker.predict(X), reference.predict(X))
@@ -255,22 +321,33 @@ def test_record_evaluation_and_log_evaluation(regression, capsys):
     assert list(recorded) == ["holdout"]
     assert sorted(recorded["holdout"]) == ["l2", "rmse"]
     assert len(recorded["holdout"]["l2"]) == 4
-    np.testing.assert_allclose(np.sqrt(recorded["holdout"]["l2"]), recorded["holdout"]["rmse"], rtol=1e-9)
-    lines = [line for line in capsys.readouterr().out.splitlines() if line.startswith("[")]
+    np.testing.assert_allclose(
+        np.sqrt(recorded["holdout"]["l2"]), recorded["holdout"]["rmse"], rtol=1e-9
+    )
+    lines = [
+        line for line in capsys.readouterr().out.splitlines() if line.startswith("[")
+    ]
     assert [line.split("\t")[0] for line in lines] == ["[2]", "[4]"]
     assert lines[0].split("\t")[1].startswith("holdout's l2: ")
 
 
 def test_params_win_over_num_boost_round(regression):
     X, y = regression
-    booster = silvic.train({**BASE_PARAMS, "n_estimators": 3}, silvic.Dataset(X, label=y), 50, verbose_eval=False)
+    booster = silvic.train(
+        {**BASE_PARAMS, "n_estimators": 3},
+        silvic.Dataset(X, label=y),
+        50,
+        verbose_eval=False,
+    )
     assert booster.num_trees() == 3
 
 
 def test_unknown_param_raises_value_error(regression):
     X, y = regression
     with pytest.raises(ValueError, match="not_a_param") as caught:
-        silvic.train({"not_a_param": 1}, silvic.Dataset(X, label=y), 2, verbose_eval=False)
+        silvic.train(
+            {"not_a_param": 1}, silvic.Dataset(X, label=y), 2, verbose_eval=False
+        )
     assert isinstance(caught.value, silvic.SilvicError)
     assert isinstance(caught.value, silvic.ConfigError)
 
@@ -287,13 +364,21 @@ def test_unknown_param_raises_value_error(regression):
 def test_unsupported_training_options_raise(regression, kwargs):
     X, y = regression
     with pytest.raises(ValueError, match="does not support"):
-        silvic.train(dict(BASE_PARAMS), silvic.Dataset(X, label=y), 2, verbose_eval=False, **kwargs)
+        silvic.train(
+            dict(BASE_PARAMS),
+            silvic.Dataset(X, label=y),
+            2,
+            verbose_eval=False,
+            **kwargs,
+        )
 
 
 def test_early_stopping_param_raises(regression):
     X, y = regression
     with pytest.raises(ValueError, match="early stopping"):
-        silvic.train({**BASE_PARAMS, "early_stopping_round": 3}, silvic.Dataset(X, label=y), 2)
+        silvic.train(
+            {**BASE_PARAMS, "early_stopping_round": 3}, silvic.Dataset(X, label=y), 2
+        )
 
 
 def test_callback_exception_propagates(regression):
@@ -307,7 +392,9 @@ def test_callback_exception_propagates(regression):
             raise Stop
 
     with pytest.raises(Stop):
-        silvic.train(dict(BASE_PARAMS), silvic.Dataset(X, label=y), 10, callbacks=[stop_at_three])
+        silvic.train(
+            dict(BASE_PARAMS), silvic.Dataset(X, label=y), 10, callbacks=[stop_at_three]
+        )
 
 
 def test_available_devices_lists_cpu():
@@ -318,18 +405,50 @@ def test_available_devices_lists_cpu():
 def test_metal_matches_cpu():
     # L2 gradients are exact in f32, so Metal trains the CPU's model bit for bit. Binary and lambdarank gradients
     # are f64 formulas on the CPU and f32 on Metal (no f64 there), so those models agree to rounding only.
-    metal, X, _ = _train_case("regression", device_type="metal", bagging_fraction=0.8, bagging_freq=1)
-    cpu, _, _ = _train_case("regression", device_type="cpu", bagging_fraction=0.8, bagging_freq=1)
+    metal, X, _ = _train_case(
+        "regression", device_type="metal", bagging_fraction=0.8, bagging_freq=1
+    )
+    cpu, _, _ = _train_case(
+        "regression", device_type="cpu", bagging_fraction=0.8, bagging_freq=1
+    )
     assert metal.model_to_string() == cpu.model_to_string()
-    metal, X, _ = _train_case("lambdarank", device_type="metal", bagging_fraction=0.8, bagging_freq=1)
-    cpu, _, _ = _train_case("lambdarank", device_type="cpu", bagging_fraction=0.8, bagging_freq=1)
+    metal, X, _ = _train_case(
+        "lambdarank", device_type="metal", bagging_fraction=0.8, bagging_freq=1
+    )
+    cpu, _, _ = _train_case(
+        "lambdarank", device_type="cpu", bagging_fraction=0.8, bagging_freq=1
+    )
     assert metal.num_trees() == cpu.num_trees() == ROUNDS
     np.testing.assert_allclose(metal.predict(X), cpu.predict(X), rtol=1e-3, atol=1e-4)
 
 
-def test_missing_device_raises_runtime_error():
-    if "cuda" in silvic.available_devices():
-        pytest.skip("CUDA is present")
+@pytest.mark.parametrize("device", ["cuda", "neuron"])
+def test_missing_device_raises_runtime_error(device):
+    if device in silvic.available_devices():
+        pytest.skip(f"{device} is present")
     X, y = regression_data(rows=200)
-    with pytest.raises(RuntimeError, match="cuda"):
-        silvic.train({**BASE_PARAMS, "device_type": "cuda"}, silvic.Dataset(X, label=y), 2, verbose_eval=False)
+    with pytest.raises(silvic.DeviceError):
+        silvic.train(
+            {**BASE_PARAMS, "device_type": device},
+            silvic.Dataset(X, label=y),
+            2,
+            verbose_eval=False,
+        )
+
+
+@pytest.mark.skipif(
+    "neuron" not in silvic.available_devices(), reason="no Neuron device"
+)
+@pytest.mark.parametrize("name", CASES)
+def test_neuron_training_matches_cpu(name):
+    options = {"bagging_fraction": 0.8, "bagging_freq": 1, "feature_fraction": 0.8}
+    neuron, X, _ = _train_case(name, device_type="neuron", gpu_device_id=0, **options)
+    cpu, _, _ = _train_case(name, device_type="cpu", **options)
+    assert neuron.num_trees() == cpu.num_trees() == ROUNDS
+    for raw_score in (True, False):
+        np.testing.assert_allclose(
+            neuron.predict(X, raw_score=raw_score),
+            cpu.predict(X, raw_score=raw_score),
+            rtol=1e-3,
+            atol=1e-4,
+        )
