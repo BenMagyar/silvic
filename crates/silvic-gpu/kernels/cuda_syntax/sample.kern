@@ -1,0 +1,73 @@
+// Uses every macro of the kernel vocabulary once, so the CUDA syntax check covers the whole prelude independently
+// of what `kernels.kern` happens to use.
+
+struct SampleParams {
+    uint num_rows;
+    int bias;
+    float scale;
+    uint pad;
+};
+
+DEVICE_FN uint sample_mix32(uint x) {
+    x ^= x >> 16;
+    x *= 0x7feb352du;
+    x ^= x >> 15;
+    x *= 0x846ca68bu;
+    x ^= x >> 16;
+    return x;
+}
+
+DEVICE_FN float sample_sum(CGPTR(float) values, GPTR(float) scratch, SPTR(float) shared_values, uint n) {
+    float total = 0.0f;
+    for (uint k = 0; k < n; k++) {
+        total += values[k] + scratch[k] + shared_values[k];
+    }
+    return total;
+}
+
+KERNEL(sample_kernel)(
+    BUF(float, out, 0),
+    CBUF(float, values, 1),
+    CBUF(uchar, bins, 2),
+    ABUF_I32(hist_i32, 3),
+    ABUF_F32(hist_f32, 4),
+    BUF(i64, wide, 5),
+    CBUF(ushort, narrow, 6),
+    BUF(u64, wide_unsigned, 7),
+    PARAMS(SampleParams, params, 8) KERNEL_ARGS) {
+    SHARED_ARRAY(float, shared_values, 256);
+    SHARED_ATOMIC_I32_ARRAY(shared_i32, 256);
+    SHARED_ATOMIC_F32_ARRAY(shared_f32, 256);
+
+    uint row = GID_X * GSIZE + LID;
+    uint lane = LID;
+    ATOMIC_STORE_SHARED_I32(shared_i32, lane, 0);
+    ATOMIC_STORE_SHARED_F32(shared_f32, lane, 0.0f);
+    shared_values[lane] = 0.0f;
+    BARRIER();
+
+    if (row < params.num_rows) {
+        uint bin = bins[row];
+        float v = values[row];
+        float u = (float)(sample_mix32(row ^ GID_Y) >> 8) * (1.0f / 16777216.0f);
+        float q = F32_TRUNC(F32_FMA(v, params.scale, u)) + F32_RINT(v);
+        float w = F32_EXP(F32_LOG(F32_ABS(v) + 1.0f)) + F32_LOG2(2.0f) + F32_SQRT(4.0f);
+        ATOMIC_ADD_SHARED_I32(shared_i32, bin, (int)q + params.bias);
+        ATOMIC_ADD_SHARED_F32(shared_f32, bin, w);
+        wide[row] = (i64)q * (i64)narrow[row];
+        wide_unsigned[row] = (u64)row << 32;
+    }
+    BARRIER();
+
+    int count = ATOMIC_LOAD_SHARED_I32(shared_i32, lane);
+    float sum = ATOMIC_LOAD_SHARED_F32(shared_f32, lane);
+    if (count != 0) {
+        ATOMIC_ADD_GLOBAL_I32(hist_i32, lane, count);
+    }
+    if (sum != 0.0f) {
+        ATOMIC_ADD_GLOBAL_F32(hist_f32, lane, sum);
+    }
+    if (row < params.num_rows && GID_Y + 1 == NGROUPS_Y) {
+        out[row] = sample_sum(values, out, shared_values, 1) + (float)NGROUPS_X;
+    }
+}

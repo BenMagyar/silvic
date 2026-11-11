@@ -1,0 +1,705 @@
+// The device side of `silvic_gpu::GpuBackend`. Written against the macro vocabulary only (see the preludes), so the
+// same text compiles as Metal Shading Language and CUDA C++. Each kernel names the `silvic_core` host function whose
+// results it reproduces; integer kernels match them exactly, float kernels use the same f32 operation order.
+
+// -- reductions ------------------------------------------------------------------------------------------------------
+
+// Sum of one value per thread; every thread gets the total. GSIZE must be a power of two.
+DEVICE_FN uint reduce_sum_u32(SPTR(uint) buf, uint lid, uint size, uint value) {
+    buf[lid] = value;
+    BARRIER();
+    for (uint half_size = size >> 1; half_size > 0u; half_size >>= 1) {
+        if (lid < half_size) {
+            buf[lid] += buf[lid + half_size];
+        }
+        BARRIER();
+    }
+    uint total = buf[0];
+    BARRIER();
+    return total;
+}
+
+DEVICE_FN float reduce_sum_f32(SPTR(float) buf, uint lid, uint size, float value) {
+    buf[lid] = value;
+    BARRIER();
+    for (uint half_size = size >> 1; half_size > 0u; half_size >>= 1) {
+        if (lid < half_size) {
+            buf[lid] += buf[lid + half_size];
+        }
+        BARRIER();
+    }
+    float total = buf[0];
+    BARRIER();
+    return total;
+}
+
+// -- fills -----------------------------------------------------------------------------------------------------------
+
+KERNEL(fill_u32)(BUF(uint, out, 0), PARAMS(FillParams, p, 1) KERNEL_ARGS) {
+    for (uint i = GID_X * GSIZE + LID; i < p.n; i += NGROUPS_X * GSIZE) {
+        out[i] = p.value;
+    }
+}
+
+// `out[i] = value + i`: the partition of every row.
+KERNEL(iota_u32)(BUF(uint, out, 0), PARAMS(FillParams, p, 1) KERNEL_ARGS) {
+    for (uint i = GID_X * GSIZE + LID; i < p.n; i += NGROUPS_X * GSIZE) {
+        out[i] = p.value + i;
+    }
+}
+
+KERNEL(copy_u32)(CBUF(uint, src, 0), BUF(uint, dst, 1), PARAMS(CopyParams, p, 2) KERNEL_ARGS) {
+    for (uint i = GID_X * GSIZE + LID; i < p.count; i += NGROUPS_X * GSIZE) {
+        dst[p.begin + i] = src[p.begin + i];
+    }
+}
+
+// -- gradients: `silvic_core::objective::gradients` ------------------------------------------------------------------
+
+// LightGBM `RegressionL2loss::GetGradients` in f32: `g = (score - label) * weight`, `h = weight`.
+KERNEL(grad_regression)(CBUF(float, scores, 0), CBUF(float, label, 1), CBUF(float, weight, 2), BUF(float, grad, 3),
+                        BUF(float, hess, 4), PARAMS(GradParams, p, 5) KERNEL_ARGS) {
+    for (uint i = GID_X * GSIZE + LID; i < p.n; i += NGROUPS_X * GSIZE) {
+        float g = scores[i] - label[i];
+        if (p.has_weight != 0u) {
+            grad[i] = g * weight[i];
+            hess[i] = weight[i];
+        } else {
+            grad[i] = g;
+            hess[i] = 1.0f;
+        }
+    }
+}
+
+// LightGBM `BinaryLogloss::GetGradients` (no label weights), in f32.
+KERNEL(grad_binary)(CBUF(float, scores, 0), CBUF(float, label, 1), CBUF(float, weight, 2), BUF(float, grad, 3),
+                    BUF(float, hess, 4), PARAMS(GradParams, p, 5) KERNEL_ARGS) {
+    for (uint i = GID_X * GSIZE + LID; i < p.n; i += NGROUPS_X * GSIZE) {
+        float sign = label[i] > 0.0f ? 1.0f : -1.0f;
+        float response = -sign * p.sigmoid / (1.0f + F32_EXP(sign * p.sigmoid * scores[i]));
+        float abs_response = F32_ABS(response);
+        float g = response;
+        float h = abs_response * (p.sigmoid - abs_response);
+        if (p.has_weight != 0u) {
+            g = g * weight[i];
+            h = h * weight[i];
+        }
+        grad[i] = g;
+        hess[i] = h;
+    }
+}
+
+// Per-threadgroup `max |g|` and `max |h|`; the host takes the max of the partials (exact in any order).
+KERNEL(grad_stats)(CBUF(float, grad, 0), CBUF(float, hess, 1), BUF(float, partials, 2),
+                   PARAMS(StatsParams, p, 3) KERNEL_ARGS) {
+    SHARED_ARRAY(float, s_grad, REDUCE_THREADS);
+    SHARED_ARRAY(float, s_hess, REDUCE_THREADS);
+    float max_grad = 0.0f;
+    float max_hess = 0.0f;
+    for (uint i = GID_X * GSIZE + LID; i < p.n; i += NGROUPS_X * GSIZE) {
+        max_grad = max_f32(max_grad, F32_ABS(grad[i]));
+        max_hess = max_f32(max_hess, F32_ABS(hess[i]));
+    }
+    s_grad[LID] = max_grad;
+    s_hess[LID] = max_hess;
+    BARRIER();
+    for (uint half_size = GSIZE >> 1; half_size > 0u; half_size >>= 1) {
+        if (LID < half_size) {
+            s_grad[LID] = max_f32(s_grad[LID], s_grad[LID + half_size]);
+            s_hess[LID] = max_f32(s_hess[LID], s_hess[LID + half_size]);
+        }
+        BARRIER();
+    }
+    if (LID == 0u) {
+        partials[2u * GID_X] = s_grad[0];
+        partials[2u * GID_X + 1u] = s_hess[0];
+    }
+}
+
+// -- lambdarank: `silvic_core::objective::lambdarank_query` ----------------------------------------------------------
+
+DEVICE_FN int is_min_score(float score) {
+    return score < -3.4028235e38f ? 1 : 0;
+}
+
+// The sort key of a score: NaN orders as the lowest finite score, so every query still gets distinct ranks.
+DEVICE_FN float rank_key(float score) {
+    return score != score ? -3.4028235e38f : score;
+}
+
+// Rank order of `s_input[0..count]`: each item's rank is the number of items before it by (score descending, index
+// ascending), LightGBM's stable sort. One pass with one barrier: far cheaper than a bitonic sort's log^2 barrier
+// stages for the query sizes ranking data has.
+DEVICE_FN void rank_sort(SPTR(float) s_input, SPTR(float) s_score, SPTR(uint) s_index, uint count, uint lid,
+                         uint gsize) {
+    for (uint i = lid; i < count; i += gsize) {
+        float key = rank_key(s_input[i]);
+        uint rank = 0u;
+        for (uint j = 0u; j < count; ++j) {
+            float other = rank_key(s_input[j]);
+            rank += (other > key || (other == key && j < i)) ? 1u : 0u;
+        }
+        s_score[rank] = s_input[i];
+        s_index[rank] = i;
+    }
+    BARRIER();
+}
+
+// One item's lambda and hessian, and its share `sum(-p_lambda)` of LightGBM's `sum_lambdas`.
+struct RankItem {
+    float lambda;
+    float hess;
+    float abs_sum;
+};
+
+// The rounding error of `s = a + b` (Knuth's two-sum): `a + b == s + error` exactly.
+DEVICE_FN float two_sum_error(float a, float b, float s) {
+    float b_part = s - a;
+    return (a - (s - b_part)) + (b - b_part);
+}
+
+// LightGBM `LambdarankNDCG::GetSigmoid` of `high - low`: the table entry at the lower edge of the difference's bin,
+// clamped to the table. The host computes the bin `(usize)((delta - min_input) * idx_factor)` in f64; f32 would
+// land in the neighbouring bin for a few percent of pairs, so the index is computed in double-float (an f32 pair,
+// ~48 bits) from the exact difference.
+DEVICE_FN float pair_sigmoid(CGPTR(float) table, RankParams p, float high, float low) {
+    float delta = high - low;
+    float delta_lo = two_sum_error(high, -low, delta);
+    float x = delta - p.sigmoid_min_hi;
+    float x_lo = two_sum_error(delta, -p.sigmoid_min_hi, x) + (delta_lo - p.sigmoid_min_lo);
+    float x_hi = x + x_lo;
+    x_lo = x_lo - (x_hi - x);
+    if (x_hi <= 0.0f) {
+        return table[0];
+    }
+    float product = x_hi * p.sigmoid_factor_hi;
+    float product_lo =
+        F32_FMA(x_hi, p.sigmoid_factor_hi, -product) + (x_hi * p.sigmoid_factor_lo + x_lo * p.sigmoid_factor_hi);
+    float bin = F32_TRUNC(product);
+    float rest = (product - bin) + product_lo;
+    if (rest < 0.0f) {
+        bin -= 1.0f;
+    } else if (rest >= 1.0f) {
+        bin += 1.0f;
+    }
+    return bin >= (float)p.sigmoid_last ? table[p.sigmoid_last] : table[(uint)bin];
+}
+
+// The item at `rank` over its partners in rank order (LightGBM `LambdarankNDCG::GetGradientsForOneQuery`, with each
+// pair's terms accumulated by both of its items).
+DEVICE_FN RankItem rank_item(SPTR(float) s_score, SPTR(int) s_label, CGPTR(float) label_gain, CGPTR(float) discount,
+                             CGPTR(float) sigmoid_table, RankParams p, uint rank, uint count, float inverse_max_dcg,
+                             int use_norm) {
+    RankItem out;
+    out.lambda = 0.0f;
+    out.hess = 0.0f;
+    out.abs_sum = 0.0f;
+    float score = s_score[rank];
+    if (is_min_score(score) != 0) {
+        return out;
+    }
+    int label = s_label[rank];
+    uint end = rank < p.truncation_level ? count : min_u32(p.truncation_level, count);
+    for (uint other = 0u; other < end; ++other) {
+        int other_label = s_label[other];
+        float other_score = s_score[other];
+        if (other == rank || other_label == label || is_min_score(other_score) != 0) {
+            continue;
+        }
+        int is_high = label > other_label ? 1 : 0;
+        uint high_rank = is_high != 0 ? rank : other;
+        uint low_rank = is_high != 0 ? other : rank;
+        float high_score = is_high != 0 ? score : other_score;
+        float low_score = is_high != 0 ? other_score : score;
+        float high_gain = label_gain[is_high != 0 ? label : other_label];
+        float low_gain = label_gain[is_high != 0 ? other_label : label];
+        float delta_score = high_score - low_score;
+        float delta_ndcg = (high_gain - low_gain) * F32_ABS(discount[high_rank] - discount[low_rank]) * inverse_max_dcg;
+        if (use_norm != 0) {
+            delta_ndcg = delta_ndcg / (0.01f + F32_ABS(delta_score));
+        }
+        float sig = pair_sigmoid(sigmoid_table, p, high_score, low_score);
+        float p_lambda = sig * (-p.sigmoid * delta_ndcg);
+        float p_hess = (sig * (1.0f - sig)) * (p.sigmoid * p.sigmoid * delta_ndcg);
+        out.lambda = is_high != 0 ? out.lambda + p_lambda : out.lambda - p_lambda;
+        out.hess += p_hess;
+        out.abs_sum -= p_lambda;
+    }
+    return out;
+}
+
+DEVICE_FN void lambdarank_one_query(CGPTR(float) scores, CGPTR(float) label, CGPTR(float) weight,
+                                    CGPTR(float) label_gain, CGPTR(float) discount, CGPTR(float) sigmoid_table,
+                                    GPTR(float) grad, GPTR(float) hess, RankParams p, uint start, uint count,
+                                    float inverse_max_dcg,
+                                    SPTR(float) s_score, SPTR(uint) s_index, SPTR(int) s_label,
+                                    SPTR(float) s_lambda, SPTR(float) s_hess, SPTR(float) s_sum, uint lid,
+                                    uint gsize) {
+    // `s_lambda` holds the query's scores in row order until the lambdas overwrite it.
+    for (uint i = lid; i < count; i += gsize) {
+        s_lambda[i] = scores[start + i];
+    }
+    BARRIER();
+    rank_sort(s_lambda, s_score, s_index, count, lid, gsize);
+    for (uint r = lid; r < count; r += gsize) {
+        s_label[r] = (int)label[start + s_index[r]];
+    }
+    BARRIER();
+    float best_score = s_score[0];
+    uint worst_rank = count - 1u;
+    if (worst_rank > 0u && is_min_score(s_score[worst_rank]) != 0) {
+        worst_rank -= 1u;
+    }
+    int use_norm = (p.norm != 0u && best_score != s_score[worst_rank]) ? 1 : 0;
+    float abs_sum = 0.0f;
+    for (uint r = lid; r < count; r += gsize) {
+        RankItem item =
+            rank_item(s_score, s_label, label_gain, discount, sigmoid_table, p, r, count, inverse_max_dcg, use_norm);
+        s_lambda[r] = item.lambda;
+        s_hess[r] = item.hess;
+        abs_sum += item.abs_sum;
+    }
+    float sum_lambdas = reduce_sum_f32(s_sum, lid, gsize, abs_sum);
+    int normalize = (p.norm != 0u && sum_lambdas > 0.0f) ? 1 : 0;
+    float norm_factor = normalize != 0 ? F32_LOG2(1.0f + sum_lambdas) / sum_lambdas : 1.0f;
+    for (uint r = lid; r < count; r += gsize) {
+        uint row = start + s_index[r];
+        float g = normalize != 0 ? s_lambda[r] * norm_factor : s_lambda[r];
+        float h = normalize != 0 ? s_hess[r] * norm_factor : s_hess[r];
+        if (p.has_weight != 0u) {
+            g = g * weight[row];
+            h = h * weight[row];
+        }
+        grad[row] = g;
+        hess[row] = h;
+    }
+    BARRIER();
+}
+
+// One threadgroup per query of at most LAMBDARANK_CAP_<k> rows; longer queries are computed on the host.
+#define LAMBDARANK_KERNEL(name, capacity)                                                                           \
+    KERNEL(name)(CBUF(float, scores, 0), CBUF(float, label, 1), CBUF(float, weight, 2),                             \
+                 CBUF(uint, query_bounds, 3), CBUF(uint, queries, 4), CBUF(float, inverse_max_dcg, 5),              \
+                 CBUF(float, label_gain, 6), CBUF(float, discount, 7), CBUF(float, sigmoid_table, 8),               \
+                 BUF(float, grad, 9), BUF(float, hess, 10), PARAMS(RankParams, params, 11) KERNEL_ARGS) {           \
+        SHARED_ARRAY(float, s_score, capacity);                                                                     \
+        SHARED_ARRAY(uint, s_index, capacity);                                                                      \
+        SHARED_ARRAY(int, s_label, capacity);                                                                       \
+        SHARED_ARRAY(float, s_lambda, capacity);                                                                    \
+        SHARED_ARRAY(float, s_hess, capacity);                                                                      \
+        SHARED_ARRAY(float, s_sum, LAMBDARANK_THREADS_MAX);                                                         \
+        RankParams p = params;                                                                                      \
+        for (uint k = GID_X; k < p.num_queries; k += NGROUPS_X) {                                                   \
+            uint query = queries[p.query_begin + k];                                                                \
+            uint start = query_bounds[query];                                                                       \
+            uint count = query_bounds[query + 1u] - start;                                                          \
+            lambdarank_one_query(scores, label, weight, label_gain, discount, sigmoid_table, grad, hess, p, start,  \
+                                 count,                                                                             \
+                                 inverse_max_dcg[query], s_score, s_index, s_label, s_lambda, s_hess, s_sum, LID,   \
+                                 GSIZE);                                                                            \
+        }                                                                                                           \
+    }
+
+LAMBDARANK_KERNEL(lambdarank_small, LAMBDARANK_CAP_SMALL)
+LAMBDARANK_KERNEL(lambdarank_medium, LAMBDARANK_CAP_MEDIUM)
+LAMBDARANK_KERNEL(lambdarank_large, LAMBDARANK_CAP_LARGE)
+
+// -- quantization: `silvic_core::quantize::quantize_row` -------------------------------------------------------------
+
+KERNEL(quantize)(CBUF(float, grad, 0), CBUF(float, hess, 1), BUF(int, gh, 2), PARAMS(QuantParams, params, 3)
+                     KERNEL_ARGS) {
+    QuantParams p = params;
+    for (uint i = GID_X * GSIZE + LID; i < p.n; i += NGROUPS_X * GSIZE) {
+        uint row_lo = p.row_offset_lo + i;
+        uint row_hi = p.row_offset_hi + (row_lo < i ? 1u : 0u);
+        int g_q = quantize_grad(p, grad[i], row_lo, row_hi);
+        int h_q = quantize_hess(p, hess[i], row_lo, row_hi);
+        gh[i] = h_q * 65536 + g_q;
+    }
+}
+
+// -- stable compaction (bagging) and partition ------------------------------------------------------------------------
+
+DEVICE_FN uint bag_flag(BagParams p, uint row) {
+    uint row_lo = p.row_offset_lo + row;
+    uint row_hi = p.row_offset_hi + (row_lo < row ? 1u : 0u);
+    return (hash_draw(p.seed, 2u, p.round, row_lo, row_hi) >> 8) < p.threshold ? 1u : 0u;
+}
+
+// Rows of chunk GID_X in the bag of `quantize::in_bag`.
+KERNEL(bag_count)(BUF(uint, block_counts, 0), PARAMS(BagParams, params, 1) KERNEL_ARGS) {
+    SHARED_ARRAY(uint, s_sum, SCAN_THREADS);
+    BagParams p = params;
+    uint start = GID_X * p.chunk;
+    uint end = min_u32(start + p.chunk, p.n);
+    uint count = 0u;
+    for (uint row = start + LID; row < end; row += GSIZE) {
+        count += bag_flag(p, row);
+    }
+    uint total = reduce_sum_u32(s_sum, LID, GSIZE, count);
+    if (LID == 0u) {
+        block_counts[GID_X] = total;
+    }
+}
+
+// Exclusive scan of `values[0..n]` in place by one threadgroup; `total[0]` gets the sum.
+KERNEL(scan_blocks)(BUF(uint, values, 0), BUF(uint, total, 1), PARAMS(ScanParams, p, 2) KERNEL_ARGS) {
+    SHARED_ARRAY(uint, s_buf, SCAN_THREADS);
+    SHARED_ARRAY(uint, s_total, 1);
+    uint carry = 0u;
+    for (uint base = 0u; base < p.n; base += GSIZE) {
+        uint i = base + LID;
+        uint value = i < p.n ? values[i] : 0u;
+        uint exclusive = scan_exclusive(s_buf, LID, GSIZE, value, s_total);
+        uint tile_total = s_total[0];
+        if (i < p.n) {
+            values[i] = carry + exclusive;
+        }
+        carry += tile_total;
+    }
+    if (LID == 0u) {
+        total[0] = carry;
+    }
+}
+
+KERNEL(bag_scatter)(CBUF(uint, block_offsets, 0), BUF(uint, partition, 1), PARAMS(BagParams, params, 2)
+                        KERNEL_ARGS) {
+    SHARED_ARRAY(uint, s_buf, SCAN_THREADS);
+    SHARED_ARRAY(uint, s_total, 1);
+    BagParams p = params;
+    uint start = GID_X * p.chunk;
+    uint end = min_u32(start + p.chunk, p.n);
+    uint out = block_offsets[GID_X];
+    for (uint base = start; base < end; base += GSIZE) {
+        uint row = base + LID;
+        uint flag = row < end ? bag_flag(p, row) : 0u;
+        uint exclusive = scan_exclusive(s_buf, LID, GSIZE, flag, s_total);
+        if (flag != 0u) {
+            partition[out + exclusive] = row;
+        }
+        out += s_total[0];
+    }
+}
+
+DEVICE_FN uint split_flag(CGPTR(uchar) bins, PartitionParams p, uint row) {
+    u64 base = join_u64(p.group_base_lo, p.group_base_hi);
+    uint bin = (uint)bins[base + (u64)row * (u64)p.row_stride + (u64)p.column];
+    return bit_set(p.left_bins[bin >> 5], bin);
+}
+
+// Rows of chunk GID_X of the leaf going left (`BinSplit::goes_left`). Each row's flag is kept in `flags` (by position
+// in the leaf), so the scatter reads one contiguous byte instead of gathering the row's bin again.
+KERNEL(partition_count)(CBUF(uint, partition, 0), CBUF(uchar, bins, 1), BUF(uint, block_counts, 2),
+                        BUF(uchar, flags, 3), PARAMS(PartitionParams, params, 4) KERNEL_ARGS) {
+    SHARED_ARRAY(uint, s_sum, SCAN_THREADS);
+    PartitionParams p = params;
+    uint start = GID_X * p.chunk;
+    uint end = min_u32(start + p.chunk, p.count);
+    uint count = 0u;
+    for (uint i = start + LID; i < end; i += GSIZE) {
+        uint flag = split_flag(bins, p, partition[p.begin + i]);
+        flags[i] = (uchar)flag;
+        count += flag;
+    }
+    uint total = reduce_sum_u32(s_sum, LID, GSIZE, count);
+    if (LID == 0u) {
+        block_counts[GID_X] = total;
+    }
+}
+
+// Stable scatter of the leaf's rows into `scratch` (left rows first), at the positions the scanned block counts
+// give; `copy_u32` moves them back.
+KERNEL(partition_scatter)(CBUF(uint, partition, 0), CBUF(uchar, flags, 1), CBUF(uint, block_offsets, 2),
+                          CBUF(uint, left_total, 3), BUF(uint, scratch, 4), PARAMS(PartitionParams, params, 5)
+                              KERNEL_ARGS) {
+    SHARED_ARRAY(uint, s_buf, SCAN_THREADS);
+    SHARED_ARRAY(uint, s_total, 1);
+    PartitionParams p = params;
+    uint start = GID_X * p.chunk;
+    uint end = min_u32(start + p.chunk, p.count);
+    uint left_out = block_offsets[GID_X];
+    uint right_out = left_total[0] + (start - left_out);
+    for (uint base = start; base < end; base += GSIZE) {
+        uint i = base + LID;
+        uint row = i < end ? partition[p.begin + i] : 0u;
+        uint flag = i < end ? (uint)flags[i] : 0u;
+        uint exclusive = scan_exclusive(s_buf, LID, GSIZE, flag, s_total);
+        uint tile_left = s_total[0];
+        if (i < end) {
+            uint position = flag != 0u ? left_out + exclusive : right_out + (LID - exclusive);
+            scratch[p.begin + position] = row;
+        }
+        left_out += tile_left;
+        right_out += min_u32(end - base, GSIZE) - tile_left;
+    }
+}
+
+// -- histograms ------------------------------------------------------------------------------------------------------
+
+// `col_map` entries pack a column's unit-relative bin offset (low 16 bits) with its most frequent bin (bits 16..24);
+// -1 skips the column. Threads add the most frequent bin of their columns in a register and flush it once, so a
+// column dominated by one bin (zeros, missing values) costs no shared-memory traffic for that bin, as LightGBM skips
+// `most_freq_bin` in its sparse histograms.
+#define HIST_COLUMN_SETUP(k)                                                                                        \
+    int entry##k = col_map[col + k##u];                                                                             \
+    int off##k = entry##k < 0 ? -1 : (entry##k & 0xffff);                                                           \
+    uint mfb##k = (uint)entry##k >> 16;                                                                             \
+    int acc##k = 0;
+
+#define HIST_QUANT_ADD_COLUMN(k, word, packed)                                                                      \
+    if (off##k >= 0) {                                                                                              \
+        uint bin##k = ((word) >> (8u * k##u)) & 0xffu;                                                              \
+        if (bin##k == mfb##k) {                                                                                     \
+            acc##k += (packed);                                                                                     \
+        } else {                                                                                                    \
+            ATOMIC_ADD_SHARED_I32(s_hist, (uint)off##k + bin##k, (packed));                                         \
+        }                                                                                                           \
+    }
+
+#define HIST_QUANT_ADD_WORD(word, packed)                                                                           \
+    HIST_QUANT_ADD_COLUMN(0, word, packed)                                                                          \
+    HIST_QUANT_ADD_COLUMN(1, word, packed)                                                                          \
+    HIST_QUANT_ADD_COLUMN(2, word, packed)                                                                          \
+    HIST_QUANT_ADD_COLUMN(3, word, packed)
+
+#define HIST_QUANT_FLUSH_COLUMN(k)                                                                                  \
+    if (off##k >= 0 && acc##k != 0) {                                                                               \
+        ATOMIC_ADD_SHARED_I32(s_hist, (uint)off##k + mfb##k, acc##k);                                               \
+    }
+
+// Quantized histogram of rows [GID_X * rows_per_block, ...) of the leaf for work unit GID_Y: packed `h * 65536 + g`
+// adds into one i32 per bin in threadgroup memory (`rows_per_block` keeps both i16 halves from overflowing), then
+// unpacked into the global (g, h) int histogram.
+KERNEL(hist_quant)(CBUF(uint, partition, 0), CBUF(int, gh, 1), CBUF(uint, bins, 2), CBUF(HistUnit, units, 3),
+                   CBUF(int, col_map, 4), ABUF_I32(hist, 5), CBUF(uint, left_total, 6), PARAMS(HistParams, params, 7)
+                       KERNEL_ARGS) {
+    SHARED_ATOMIC_I32_ARRAY(s_hist, HIST_QUANT_BINS);
+    HistParams p = hist_rows(params, left_total);
+    // The grid covers the parent leaf; blocks past a child's rows have nothing to add.
+    if (GID_X * p.rows_per_block >= p.count) {
+        return;
+    }
+    HistUnit unit = units[GID_Y];
+    for (uint b = LID; b < unit.num_bins; b += GSIZE) {
+        ATOMIC_STORE_SHARED_I32(s_hist, b, 0);
+    }
+    BARRIER();
+    uint start = GID_X * p.rows_per_block;
+    uint end = min_u32(start + p.rows_per_block, p.count);
+    u64 words_base = join_u64(unit.words_base_lo, unit.words_base_hi);
+    if (unit.row_words <= GSIZE) {
+        // Each thread reads one fixed word (four columns) of every row it visits, so its four bin offsets stay in
+        // registers.
+        uint w = LID % unit.row_words;
+        uint rows_per_pass = GSIZE / unit.row_words;
+        uint sub = LID / unit.row_words;
+        uint col = unit.cols_begin + 4u * w;
+        HIST_COLUMN_SETUP(0)
+        HIST_COLUMN_SETUP(1)
+        HIST_COLUMN_SETUP(2)
+        HIST_COLUMN_SETUP(3)
+        if (sub < rows_per_pass) {
+            uint row_words = unit.row_words;
+            uint i = start + sub;
+            // Two rows per iteration: their loads are in flight together.
+            for (; i + rows_per_pass < end; i += 2u * rows_per_pass) {
+                uint row_a = partition[p.begin + i];
+                uint row_b = partition[p.begin + i + rows_per_pass];
+                int packed_a = gh[row_a];
+                int packed_b = gh[row_b];
+                uint word_a = bins[words_base + (u64)row_a * (u64)row_words + w];
+                uint word_b = bins[words_base + (u64)row_b * (u64)row_words + w];
+                HIST_QUANT_ADD_WORD(word_a, packed_a)
+                HIST_QUANT_ADD_WORD(word_b, packed_b)
+            }
+            if (i < end) {
+                uint row = partition[p.begin + i];
+                int packed = gh[row];
+                uint word = bins[words_base + (u64)row * (u64)row_words + w];
+                HIST_QUANT_ADD_WORD(word, packed)
+            }
+        }
+        HIST_QUANT_FLUSH_COLUMN(0)
+        HIST_QUANT_FLUSH_COLUMN(1)
+        HIST_QUANT_FLUSH_COLUMN(2)
+        HIST_QUANT_FLUSH_COLUMN(3)
+    } else {
+        for (uint i = start; i < end; ++i) {
+            uint row = partition[p.begin + i];
+            int packed = gh[row];
+            u64 row_base = words_base + (u64)row * (u64)unit.row_words;
+            for (uint w = LID; w < unit.row_words; w += GSIZE) {
+                uint word = bins[row_base + w];
+                uint col = unit.cols_begin + 4u * w;
+                for (uint k = 0u; k < 4u; ++k) {
+                    int entry = col_map[col + k];
+                    if (entry >= 0) {
+                        uint offset = (uint)(entry & 0xffff);
+                        ATOMIC_ADD_SHARED_I32(s_hist, offset + ((word >> (8u * k)) & 0xffu), packed);
+                    }
+                }
+            }
+        }
+    }
+    BARRIER();
+    for (uint b = LID; b < unit.num_bins; b += GSIZE) {
+        int value = ATOMIC_LOAD_SHARED_I32(s_hist, b);
+        if (value != 0) {
+            int g = (int)(short)(value & 0xffff);
+            int h = (value - g) >> 16;
+            uint index = 2u * (unit.bin_begin + b);
+            if (g != 0) {
+                ATOMIC_ADD_GLOBAL_I32(hist, index, g);
+            }
+            if (h != 0) {
+                ATOMIC_ADD_GLOBAL_I32(hist, index + 1u, h);
+            }
+        }
+    }
+}
+
+// Float histogram: f32 atomics into threadgroup memory, flushed into the global (g, h) f32 histogram.
+KERNEL(hist_float)(CBUF(uint, partition, 0), CBUF(float, grad, 1), CBUF(float, hess, 2), CBUF(uint, bins, 3),
+                   CBUF(HistUnit, units, 4), CBUF(int, col_map, 5), ABUF_F32(hist, 6), CBUF(uint, left_total, 7),
+                   PARAMS(HistParams, params, 8) KERNEL_ARGS) {
+    SHARED_ATOMIC_F32_ARRAY(s_grad, HIST_FLOAT_BINS);
+    SHARED_ATOMIC_F32_ARRAY(s_hess, HIST_FLOAT_BINS);
+    HistParams p = hist_rows(params, left_total);
+    // The grid covers the parent leaf; blocks past a child's rows have nothing to add.
+    if (GID_X * p.rows_per_block >= p.count) {
+        return;
+    }
+    HistUnit unit = units[GID_Y];
+    for (uint b = LID; b < unit.num_bins; b += GSIZE) {
+        ATOMIC_STORE_SHARED_F32(s_grad, b, 0.0f);
+        ATOMIC_STORE_SHARED_F32(s_hess, b, 0.0f);
+    }
+    BARRIER();
+    uint start = GID_X * p.rows_per_block;
+    uint end = min_u32(start + p.rows_per_block, p.count);
+    u64 words_base = join_u64(unit.words_base_lo, unit.words_base_hi);
+    if (unit.row_words <= GSIZE) {
+        // As in hist_quant: one fixed word per thread, its four columns' offsets and most frequent bins in registers.
+        uint w = LID % unit.row_words;
+        uint rows_per_pass = GSIZE / unit.row_words;
+        uint sub = LID / unit.row_words;
+        uint col = unit.cols_begin + 4u * w;
+        int offsets[4];
+        uint mfbs[4];
+        float acc_grad[4];
+        float acc_hess[4];
+        for (uint k = 0u; k < 4u; ++k) {
+            int entry = col_map[col + k];
+            offsets[k] = entry < 0 ? -1 : (entry & 0xffff);
+            mfbs[k] = (uint)entry >> 16;
+            acc_grad[k] = 0.0f;
+            acc_hess[k] = 0.0f;
+        }
+        if (sub < rows_per_pass) {
+            for (uint i = start + sub; i < end; i += rows_per_pass) {
+                uint row = partition[p.begin + i];
+                float g = grad[row];
+                float h = hess[row];
+                uint word = bins[words_base + (u64)row * (u64)unit.row_words + w];
+                for (uint k = 0u; k < 4u; ++k) {
+                    uint bin = (word >> (8u * k)) & 0xffu;
+                    if (offsets[k] >= 0 && bin == mfbs[k]) {
+                        acc_grad[k] += g;
+                        acc_hess[k] += h;
+                    } else if (offsets[k] >= 0) {
+                        ATOMIC_ADD_SHARED_F32(s_grad, (uint)offsets[k] + bin, g);
+                        ATOMIC_ADD_SHARED_F32(s_hess, (uint)offsets[k] + bin, h);
+                    }
+                }
+            }
+        }
+        for (uint k = 0u; k < 4u; ++k) {
+            if (offsets[k] >= 0 && (acc_grad[k] != 0.0f || acc_hess[k] != 0.0f)) {
+                ATOMIC_ADD_SHARED_F32(s_grad, (uint)offsets[k] + mfbs[k], acc_grad[k]);
+                ATOMIC_ADD_SHARED_F32(s_hess, (uint)offsets[k] + mfbs[k], acc_hess[k]);
+            }
+        }
+    } else {
+        for (uint i = start; i < end; ++i) {
+            uint row = partition[p.begin + i];
+            float g = grad[row];
+            float h = hess[row];
+            u64 row_base = words_base + (u64)row * (u64)unit.row_words;
+            for (uint w = LID; w < unit.row_words; w += GSIZE) {
+                uint word = bins[row_base + w];
+                uint col = unit.cols_begin + 4u * w;
+                for (uint k = 0u; k < 4u; ++k) {
+                    int entry = col_map[col + k];
+                    if (entry >= 0) {
+                        uint b = (uint)(entry & 0xffff) + ((word >> (8u * k)) & 0xffu);
+                        ATOMIC_ADD_SHARED_F32(s_grad, b, g);
+                        ATOMIC_ADD_SHARED_F32(s_hess, b, h);
+                    }
+                }
+            }
+        }
+    }
+    BARRIER();
+    for (uint b = LID; b < unit.num_bins; b += GSIZE) {
+        float g = ATOMIC_LOAD_SHARED_F32(s_grad, b);
+        float h = ATOMIC_LOAD_SHARED_F32(s_hess, b);
+        uint index = 2u * (unit.bin_begin + b);
+        if (g != 0.0f) {
+            ATOMIC_ADD_GLOBAL_F32(hist, index, g);
+        }
+        if (h != 0.0f) {
+            ATOMIC_ADD_GLOBAL_F32(hist, index + 1u, h);
+        }
+    }
+}
+
+// -- leaf renewal: `quantize::to_fixed` sums -------------------------------------------------------------------------
+
+// Fixed-point (g, h) sums of the partition positions `jobs[2 * GID_X]..jobs[2 * GID_X + 1]` (part of one leaf) into
+// `partials[GID_X]`; one launch covers every leaf, and the host adds each leaf's partials (exact: integers).
+KERNEL(leaf_sums)(CBUF(uint, partition, 0), CBUF(float, grad, 1), CBUF(float, hess, 2), CBUF(uint, jobs, 3),
+                  BUF(i64, partials, 4), PARAMS(LeafSumParams, params, 5) KERNEL_ARGS) {
+    SHARED_ARRAY(i64, s_grad, REDUCE_THREADS);
+    SHARED_ARRAY(i64, s_hess, REDUCE_THREADS);
+    LeafSumParams p = params;
+    uint start = jobs[2u * GID_X];
+    uint end = jobs[2u * GID_X + 1u];
+    i64 sum_grad = 0;
+    i64 sum_hess = 0;
+    for (uint i = start + LID; i < end; i += GSIZE) {
+        uint row = partition[i];
+        sum_grad += to_fixed(grad[row], p.grad_scale);
+        sum_hess += to_fixed(hess[row], p.hess_scale);
+    }
+    s_grad[LID] = sum_grad;
+    s_hess[LID] = sum_hess;
+    BARRIER();
+    for (uint half_size = GSIZE >> 1; half_size > 0u; half_size >>= 1) {
+        if (LID < half_size) {
+            s_grad[LID] += s_grad[LID + half_size];
+            s_hess[LID] += s_hess[LID + half_size];
+        }
+        BARRIER();
+    }
+    if (LID == 0u) {
+        partials[2u * GID_X] = s_grad[0];
+        partials[2u * GID_X + 1u] = s_hess[0];
+    }
+}
+
+// -- scores ----------------------------------------------------------------------------------------------------------
+
+// Adds a tree's leaf value to every row's score, walking the tree on binned rows (`Tree::GetLeaf` on bins).
+KERNEL(add_tree)(CBUF(uchar, bins, 0), CBUF(GroupLayout, groups, 1), CBUF(TreeNode, nodes, 2),
+                 CBUF(float, leaf_values, 3), BUF(float, scores, 4), PARAMS(TreeParams, p, 5) KERNEL_ARGS) {
+    for (uint i = GID_X * GSIZE + LID; i < p.n; i += NGROUPS_X * GSIZE) {
+        int node = p.num_nodes == 0u ? -1 : 0;
+        while (node >= 0) {
+            uint group = nodes[node].group;
+            u64 base = join_u64(groups[group].base_lo, groups[group].base_hi);
+            uint bin = (uint)bins[base + (u64)i * (u64)groups[group].row_stride + (u64)nodes[node].column];
+            node = bit_set(nodes[node].left_bins[bin >> 5], bin) != 0u ? nodes[node].left : nodes[node].right;
+        }
+        scores[i] = scores[i] + leaf_values[~node];
+    }
+}
