@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Changelog · silvic</title>
+  <meta name="description" content="Changes to silvic.">
+  <link rel="icon" href="favicon.ico" sizes="32x32">
+  <link rel="icon" href="favicon.png" type="image/png" sizes="96x96">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <link rel="alternate" type="application/rss+xml" title="silvic changelog" href="feed.xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600&amp;family=JetBrains+Mono&amp;display=swap">
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="docs.css">
+</head>
+<body>
+  <main>
+    <header class="masthead deeper">
+      <a class="rooted" href="./"><canvas class="growth" width="32" height="32" aria-hidden="true"></canvas>silvic</a>
+      <nav class="trail" aria-label="silvic">
+        <a class="homeward" href="./">Overview</a>
+        <a href="docs/">Docs</a>
+        <a href="changelog.html" aria-current="page">Changelog</a>
+      </nav>
+    </header>
+
+    <h1>Changelog</h1>
+    <p>Changes to silvic. Follow them with the <a href="feed.xml">RSS feed</a>.</p>
+
+    <h2 id="unreleased">Unreleased</h2>
+    <p>The first version: four crates, one of them the Python package.</p>
+    <dl class="manifest">
+      <dt><a href="docs/silvic-core.html"><code>silvic-core</code></a></dt>
+      <dd>LightGBM 3.3.5’s parameters, binning, objectives (<code>regression</code>, <code>binary</code>, <code>lambdarank</code>) and metrics; leaf-wise trees on quantized integer histograms, bit-reproducible on any number of ranks; LightGBM model text, read and written byte for byte; the CPU backend.</dd>
+      <dt><a href="docs/silvic-gpu.html"><code>silvic-gpu</code></a></dt>
+      <dd>Metal and CUDA backends from one kernel source, one device wait per split. Metal matches the CPU backend bit for bit on quantized L2; CUDA compiles but has not run on NVIDIA hardware.</dd>
+      <dt><a href="docs/silvic-net.html"><code>silvic-net</code></a></dt>
+      <dd>TCP ring allreduce and allgather with a token handshake, a fixed fold order, and failures that travel around the ring instead of hanging.</dd>
+      <dt><a href="docs/silvic-python.html"><code>silvic-python</code></a></dt>
+      <dd>The <code>silvic</code> package with LightGBM’s Python API and scikit-learn estimators, and <code>silvic.ray.train</code>, whose model equals single-process training on the same rows.</dd>
+    </dl>
+  </main>
+  <script src="mark.js"></script>
+</body>
+</html>

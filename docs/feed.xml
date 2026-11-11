@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0">
+  <channel>
+    <title>silvic changelog</title>
+    <link>changelog.html</link>
+    <description>Changes to silvic, LightGBM-compatible gradient boosting in Rust.</description>
+    <language>en</language>
+    <lastBuildDate>Sat, 07 Nov 2026 00:00:00 +0000</lastBuildDate>
+    <item>
+      <title>silvic, unreleased</title>
+      <link>changelog.html#unreleased</link>
+      <guid isPermaLink="false">silvic-unreleased</guid>
+      <pubDate>Sat, 07 Nov 2026 00:00:00 +0000</pubDate>
+      <description><![CDATA[
+        <p>The first version: four crates, one of them the Python package.</p>
+        <ul>
+          <li><code>silvic-core</code>: LightGBM 3.3.5’s parameters, binning, objectives (<code>regression</code>, <code>binary</code>, <code>lambdarank</code>) and metrics; leaf-wise trees on quantized integer histograms, bit-reproducible on any number of ranks; LightGBM model text, read and written byte for byte; the CPU backend.</li>
+          <li><code>silvic-gpu</code>: Metal and CUDA backends from one kernel source, one device wait per split. Metal matches the CPU backend bit for bit on quantized L2; CUDA compiles but has not run on NVIDIA hardware.</li>
+          <li><code>silvic-net</code>: TCP ring allreduce and allgather with a token handshake, a fixed fold order, and failures that travel around the ring instead of hanging.</li>
+          <li><code>silvic-python</code>: the <code>silvic</code> package with LightGBM’s Python API and scikit-learn estimators, and <code>silvic.ray.train</code>, whose model equals single-process training on the same rows.</li>
+        </ul>
+      ]]></description>
+    </item>
+  </channel>
+</rss>

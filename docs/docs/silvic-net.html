@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>silvic-net · silvic</title>
+  <meta name="description" content="TCP ring collectives for distributed silvic training.">
+  <link rel="icon" href="../favicon.ico" sizes="32x32">
+  <link rel="icon" href="../favicon.png" type="image/png" sizes="96x96">
+  <link rel="apple-touch-icon" href="../apple-touch-icon.png">
+  <link rel="alternate" type="application/rss+xml" title="silvic changelog" href="../feed.xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600&amp;family=JetBrains+Mono&amp;display=swap">
+  <link rel="stylesheet" href="../styles.css">
+  <link rel="stylesheet" href="../docs.css">
+</head>
+<body>
+  <main>
+    <header class="masthead deeper">
+      <a class="rooted" href="../"><canvas class="growth" width="32" height="32" aria-hidden="true"></canvas>silvic</a>
+      <nav class="trail" aria-label="silvic">
+        <a class="homeward" href="../">Overview</a>
+        <a href="./" aria-current="true">Docs</a>
+        <a href="../changelog.html">Changelog</a>
+      </nav>
+    </header>
+
+    <h1><code>silvic-net</code></h1>
+    <p>The collectives distributed training runs on, over a TCP ring: <code>TcpCollective</code> implements the <code>Collective</code> of <a href="silvic-core.html"><code>silvic-core</code></a>. <code>silvic.ray.train</code> creates one per Ray actor; any other launcher can do the same.</p>
+    <pre tabindex="0"><code><span class="word">let</span> listener = TcpCollective::bind_advertised(<span class="said">"0.0.0.0"</span>, &amp;node_ip)?;
+<span class="word">let</span> address = listener.address(); // gather every rank's, in rank order
+<span class="word">let</span> <span class="word">mut</span> ring = TcpCollective::connect(listener, rank, &amp;addresses, job_token, Duration::from_secs(<span class="said">1800</span>))?;</code></pre>
+
+    <h2>Public API</h2>
+    <dl class="manifest">
+      <dt><code>TcpCollective::bind(host)</code>, <code>TcpCollective::bind_advertised(host, node_ip)</code></dt>
+      <dd>A listener on an ephemeral port. <code>bind_advertised</code> listens on <code>host</code>, such as <code>0.0.0.0</code>, and advertises <code>node_ip</code>; <code>bind("0.0.0.0")</code> is an error, since other nodes cannot reach that address.</dd>
+      <dt><code>listener.address()</code></dt>
+      <dd>The <code>ip:port</code> the other ranks connect to.</dd>
+      <dt><code>TcpCollective::connect(listener, rank, addresses, job_token, timeout)</code></dt>
+      <dd>Joins the ring. <code>timeout</code> bounds the rendezvous, then how long a collective waits on a silent peer; <code>set_timeout</code> changes it later. A world of one opens no sockets.</dd>
+      <dt><code>allreduce_sum_f64</code>, <code>allreduce_sum_i64</code>, <code>allreduce_max_f64</code>, <code>allgather_bytes</code></dt>
+      <dd>The <code>Collective</code> methods: every rank calls the same ones, in the same order, with buffers of the same length.</dd>
+    </dl>
+
+    <h2>The ring</h2>
+    <p>Each rank connects to the next and accepts from the previous. The handshake carries a version, the job token, the rank and the world size, and rejects stray or mismatched peers. An allreduce is a reduce-scatter and then an allgather around the ring; below 4 KiB it is a single allgather. Every chunk folds in a fixed rank order, so a result is the same on every run for a given world size, and exact in any order for the integer-valued histograms quantized training reduces. Sockets are non-blocking and polled, so a ring step sends and receives at once and large buffers cannot deadlock.</p>
+
+    <h2>Failures</h2>
+    <p>Every frame carries the operation, a sequence number and the length, so ranks that call different collectives fail with an out-of-step error instead of exchanging garbage. A socket error, a closed peer or a timeout fails the collective with a <code>Collective</code> error naming the peer rank; the rank then shuts its sockets, so the failure travels around the ring, and every later call fails the same way.</p>
+
+    <nav class="onward" aria-label="Crates">
+      <a href="silvic-gpu.html">← <code>silvic-gpu</code></a>
+    </nav>
+  </main>
+  <script src="../mark.js"></script>
+</body>
+</html>

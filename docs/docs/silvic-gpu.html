@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>silvic-gpu · silvic</title>
+  <meta name="description" content="The Metal and CUDA backends of silvic, from one kernel source compiled at run time.">
+  <link rel="icon" href="../favicon.ico" sizes="32x32">
+  <link rel="icon" href="../favicon.png" type="image/png" sizes="96x96">
+  <link rel="apple-touch-icon" href="../apple-touch-icon.png">
+  <link rel="alternate" type="application/rss+xml" title="silvic changelog" href="../feed.xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600&amp;family=JetBrains+Mono&amp;display=swap">
+  <link rel="stylesheet" href="../styles.css">
+  <link rel="stylesheet" href="../docs.css">
+</head>
+<body>
+  <main>
+    <header class="masthead deeper">
+      <a class="rooted" href="../"><canvas class="growth" width="32" height="32" aria-hidden="true"></canvas>silvic</a>
+      <nav class="trail" aria-label="silvic">
+        <a class="homeward" href="../">Overview</a>
+        <a href="./" aria-current="true">Docs</a>
+        <a href="../changelog.html">Changelog</a>
+      </nav>
+    </header>
+
+    <h1><code>silvic-gpu</code></h1>
+    <p>The Metal and CUDA backends of <a href="silvic-core.html"><code>silvic-core</code></a>. The kernels are written once, against a small set of macros that one prelude defines for Metal Shading Language and another for CUDA C++, and compiled when a backend starts: Metal with fast math off, NVRTC with <code>--fmad=false</code>. <code>GpuBackend</code> implements the core’s <code>Backend</code> once over the device primitives, so the two backends differ only in how they allocate, copy, compile and launch.</p>
+    <pre tabindex="0"><code><span class="word">let</span> <span class="word">mut</span> backend = silvic_gpu::metal::backend(<span class="word">None</span>)?;
+<span class="word">let</span> model = silvic_core::train(&amp;params, &amp;train_set, &amp;[], &amp;<span class="word">mut</span> backend, &amp;<span class="word">mut</span> LocalCollective, &amp;<span class="word">mut</span> |_| Ok(()))?;</code></pre>
+
+    <h2>Public API</h2>
+    <dl class="manifest">
+      <dt><code>metal::backend(index)</code> <span class="default">feature metal, macOS</span></dt>
+      <dd>A compiled backend on Metal device <code>index</code>, or the system default device. Buffers use shared storage; each sync commits one command buffer.</dd>
+      <dt><code>cuda::backend(ordinal)</code> <span class="default">feature cuda</span></dt>
+      <dd>A backend on CUDA device <code>ordinal</code>, default 0, through cudarc with the driver and NVRTC loaded at run time, on one stream. It builds without a CUDA toolkit.</dd>
+      <dt><code>metal::is_available()</code>, <code>cuda::is_available()</code></dt>
+      <dd>Whether the device is there. Neither panics: a missing or mismatched CUDA driver is a <code>false</code> here and a device error from <code>cuda::backend</code>, never an abort.</dd>
+      <dt><code>GpuBackend::new(device)</code>, <code>trait GpuDevice</code></dt>
+      <dd>The backend over any device that can allocate, upload, download, compile, launch and sync.</dd>
+    </dl>
+    <p class="also"><b>Also public</b> <code>MetalDevice</code>, <code>CudaDevice</code>, <code>Arg</code>, and <code>kernel_source(prelude)</code>, the source a device compiles.</p>
+
+    <h2>On the device</h2>
+    <p>The training rows, their gradients, scores and the row order of every leaf stay on the device; a split brings back only its histogram and the count of rows going left.</p>
+    <dl class="manifest">
+      <dt>Gradients</dt>
+      <dd>L2 and binary per row; lambdarank with one threadgroup per query of up to 1024 rows, larger queries on the host.</dd>
+      <dt>Quantization and bagging</dt>
+      <dd>Bit for bit what the CPU computes, from the same counter-based hash.</dd>
+      <dt>Splits</dt>
+      <dd>A stable partition of the leaf and the histogram of the child with fewer rows, in one submission and one wait.</dd>
+      <dt>Histograms</dt>
+      <dd>Quantized gradient and hessian packed into one 32-bit integer per row, added with one atomic per feature into threadgroup memory, then flushed to the device histogram. Float histograms as well, without the exactness.</dd>
+      <dt>Leaves and scores</dt>
+      <dd>Exact fixed-point gradient sums per leaf for renewal, and each new tree added to every dataset’s scores.</dd>
+    </dl>
+    <p>Split search stays on the host, where every rank searches the same reduced histogram. On the Metal backend, quantization, histograms, partitions, leaf sums and score updates equal the CPU backend’s bit for bit, and quantized L2 models are byte-identical; binary and lambdarank gradients agree to 1e-5, Metal computing them in f32.</p>
+
+    <h2>CUDA</h2>
+    <p>The CUDA backend compiles, its kernel source passes clang’s CUDA front end, and it never panics on a missing driver, but it has not run on an NVIDIA GPU.</p>
+
+    <nav class="onward" aria-label="Crates">
+      <a href="silvic-core.html">← <code>silvic-core</code></a>
+      <a class="next" href="silvic-net.html"><code>silvic-net</code> →</a>
+    </nav>
+  </main>
+  <script src="../mark.js"></script>
+</body>
+</html>

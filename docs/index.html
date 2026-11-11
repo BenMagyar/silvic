@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>silvic</title>
+  <meta name="description" content="LightGBM-compatible gradient boosting in Rust, on the CPU, Apple Metal and NVIDIA CUDA.">
+  <link rel="icon" href="favicon.ico" sizes="32x32">
+  <link rel="icon" href="favicon.png" type="image/png" sizes="96x96">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <link rel="alternate" type="application/rss+xml" title="silvic changelog" href="feed.xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600&amp;family=JetBrains+Mono&amp;display=swap">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main>
+    <header class="masthead">
+      <h1 class="rooted"><canvas class="growth" width="40" height="40" aria-hidden="true"></canvas>silvic</h1>
+      <nav class="trail" aria-label="silvic">
+        <a href="docs/">Docs</a>
+        <a href="changelog.html">Changelog</a>
+      </nav>
+    </header>
+    <p>Gradient boosting in Rust that trains the models <a href="https://lightgbm.readthedocs.io" target="_blank" rel="noreferrer">LightGBM</a> trains, on the CPU, Apple Metal or NVIDIA CUDA, in one process or across <a href="https://www.ray.io" target="_blank" rel="noreferrer">Ray</a> actors. It writes LightGBM 3.3.5 model text, so LightGBM, its SHAP values and lleaves serve its models unchanged. Its histograms are integer sums of quantized gradients: every run gives the same model, and Ray workers train the model one process would.</p>
+
+    <h2>Against LightGBM</h2>
+    <figure class="chart">
+      <ul class="key"><li><span class="blaze us"></span>silvic</li><li><span class="blaze them"></span>LightGBM 4.7</li></ul>
+      <div class="rings" role="img" aria-label="Metal on 9 million rows, 200 trees: silvic 23.2 s, LightGBM 134.4 s. Metal on 1.8 million rows, 500 trees: silvic 23.0 s, LightGBM 65.9 s. CPU on 9 million rows, 200 trees: silvic 97.5 s, LightGBM 134.4 s. Validation NDCG at 12 on 9 million rows: silvic 0.8415, LightGBM 0.8387.">
+        <p class="reading"><b>Metal, 9M rows</b> 200 trees in 23 s. 5.8× faster.</p>
+        <span class="lane"><span class="reach us" style="--how-far: 17.26"></span><span class="reach them" style="--how-far: 100"></span></span>
+        <span class="girth"><b>23.2 s</b><br>134.4 s</span>
+
+        <p class="reading"><b>Metal, 1.8M rows</b> 500 trees in 23 s. 2.9× faster.</p>
+        <span class="lane"><span class="reach us" style="--how-far: 34.90"></span><span class="reach them" style="--how-far: 100"></span></span>
+        <span class="girth"><b>23.0 s</b><br>65.9 s</span>
+
+        <p class="reading"><b>CPU, 9M rows</b> The same 200 trees without a GPU. 1.4× faster.</p>
+        <span class="lane"><span class="reach us" style="--how-far: 72.54"></span><span class="reach them" style="--how-far: 100"></span></span>
+        <span class="girth"><b>97.5 s</b><br>134.4 s</span>
+
+        <p class="reading"><b>Accuracy</b> Validation NDCG@12 on the 9M rows, from the Metal model.</p>
+        <span class="lane"><span class="reach us" style="--how-far: 100"></span><span class="reach them" style="--how-far: 99.67"></span></span>
+        <span class="girth"><b>0.8415</b><br>0.8387</span>
+      </div>
+      <p class="in-the-margin">Lambdarank, 53 leaves, on synthetic learning-to-rank data with 136 features, on an Apple M4 Pro; LightGBM 4.7.0 on all 14 cores. Times include binning. Bars start from zero and use separate scales.</p>
+    </figure>
+
+    <h2>Use it</h2>
+    <pre tabindex="0"><code><span class="word">maturin develop</span> --release</code></pre>
+    <pre tabindex="0"><code><span class="word">import</span> silvic
+
+train_set = silvic.Dataset(X, label=y, group=query_sizes)
+booster = silvic.train({<span class="said">"objective"</span>: <span class="said">"lambdarank"</span>}, train_set, num_boost_round=<span class="said">1500</span>)
+booster.save_model(<span class="said">"model.txt"</span>)</code></pre>
+    <pre tabindex="0"><code><span class="word">import</span> silvic.ray
+
+booster = silvic.ray.train(params, ray.data.read_parquet(<span class="said">"s3://bucket/train/"</span>),
+                           label_column=<span class="said">"label"</span>, group_column=<span class="said">"query_id"</span>,
+                           num_workers=<span class="said">5</span>, use_gpu=<span class="word">True</span>)</code></pre>
+  </main>
+  <script src="mark.js"></script>
+</body>
+</html>

@@ -1,0 +1,75 @@
+:not(pre) > code {
+  font-family: var(--the-machine);
+  font-size: var(--a-murmur);
+  font-variant-ligatures: none;
+  overflow-wrap: anywhere;
+}
+
+h1 code {
+  font-size: 0.8em;
+  letter-spacing: -0.02em;
+}
+
+h2 code,
+h1 code {
+  font-family: var(--the-machine);
+}
+
+h2 code {
+  font-size: 0.9em;
+}
+
+.manifest {
+  margin: 0 0 var(--a-bough);
+}
+
+.manifest dt {
+  margin-block-start: var(--a-branch);
+}
+
+.manifest dt:first-child {
+  margin-block-start: 0;
+}
+
+.manifest dt code {
+  color: var(--green-ink);
+}
+
+.manifest dd {
+  margin: var(--a-seed) 0 0;
+  color: var(--the-understory);
+  font-size: var(--speaking-softly);
+}
+
+.also {
+  color: var(--the-understory);
+  font-size: var(--speaking-softly);
+}
+
+.also b {
+  color: var(--the-heartwood);
+  font-weight: 500;
+}
+
+.default {
+  margin-inline-start: var(--a-sprout);
+  color: var(--the-understory);
+  font-size: var(--speaking-softly);
+}
+
+.onward {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-items: baseline;
+  gap: var(--a-sprout) var(--a-branch);
+  margin-block-start: var(--a-grove);
+  padding-block-start: var(--a-branch);
+  border-block-start: var(--a-hairline) solid var(--the-lichen);
+  font-size: var(--speaking-softly);
+}
+
+.onward .next {
+  grid-column: 2;
+  justify-self: end;
+  text-align: end;
+}

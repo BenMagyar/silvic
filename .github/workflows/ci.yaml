@@ -1,0 +1,135 @@
+name: CI
+
+# check: fmt, clippy, rustdoc and the Rust tests that need no GPU (silvic-gpu's CUDA syntax test runs: ubuntu's
+# clang parses the kernels as CUDA).
+# msrv: the workspace builds with its declared rust-version.
+# macos: the Metal backend builds and its tests run; GitHub's macOS runners expose no Metal GPU to guests, so the
+# Metal tests skip with the reason printed and only a self-hosted Apple silicon runner exercises them.
+# python: the wheel builds with maturin and the Python tests run, the Ray tests on a local Ray cluster.
+# bench: every Criterion bench builds.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    name: fmt, clippy, doc, Rust tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      # rust-toolchain.toml selects the toolchain and its components.
+      - run: rustup show active-toolchain
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: cargo-check-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: cargo-check-${{ runner.os }}-
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo clippy -p silvic-gpu --features cuda --all-targets -- -D warnings
+      - run: cargo doc --workspace --no-deps
+        env:
+          RUSTDOCFLAGS: -D warnings
+      - run: cargo test -p silvic-core -p silvic-net
+      - run: cargo test -p silvic-gpu --features cuda
+
+  msrv:
+    name: MSRV (1.94.1)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      RUSTUP_TOOLCHAIN: 1.94.1
+    steps:
+      - uses: actions/checkout@v5
+      - run: rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: cargo-msrv-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: cargo-msrv-${{ runner.os }}-
+      - run: cargo check --workspace --all-targets --locked
+
+  macos:
+    name: Metal backend (macOS arm64)
+    runs-on: macos-15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: cargo-macos-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: cargo-macos-${{ runner.os }}-
+      - run: cargo clippy -p silvic-gpu --features metal --all-targets -- -D warnings
+      - run: cargo test -p silvic-gpu --features metal
+
+  python:
+    name: Python package and Ray
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: cargo-python-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: cargo-python-${{ runner.os }}-
+      - name: Environment
+        # Python 3.12 and Ray 2.58, as the rayproject/ray:2.58.0-py312 image runs.
+        run: |
+          uv venv --python 3.12 .venv
+          uv pip install --python .venv/bin/python maturin numpy pandas pyarrow "ray[default]==2.58.0" lightgbm pytest scikit-learn
+      - run: .venv/bin/maturin develop --release
+        env:
+          VIRTUAL_ENV: ${{ github.workspace }}/.venv
+      - run: .venv/bin/python -m pytest tests/python -v
+
+  bench:
+    name: Benches build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: cargo-bench-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: cargo-bench-${{ runner.os }}-
+      - run: cargo bench --workspace --no-run

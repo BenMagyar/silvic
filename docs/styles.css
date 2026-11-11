@@ -1,0 +1,363 @@
+/* Hallmark · pre-emit critique: P4 H4 E5 S4 R5 V4 */
+/* Hallmark · macrostructure: Long Document · tone: ink on paper · anchor hue: green
+ * theme: studied-DNA (source: planckton-landing) · display + body: Archivo · code: JetBrains Mono
+ */
+:root {
+  color-scheme: light dark;
+
+  --the-clearing: #ffffff;
+  --the-heartwood: #1a1a1a;
+  --the-understory: #4a4a4a;
+  --the-lichen: #9a9a9a;
+  --a-blush: #fce5e9;
+
+  --them: #b3b3b3;
+  --us: #18793a;
+
+  --green-below: #0b3a1e;
+  --green: #18793a;
+  --green-above: #b4e3c1;
+  --green-shade: #f4f6f4;
+  --green-ink: #173d24;
+  --green-bright: #18793a;
+  --green-soft: #2f7a52;
+
+  --the-voice: "Aktiv Grotesk", "Archivo", "Helvetica Neue", Arial, sans-serif;
+  --the-machine: "JetBrains Mono", ui-monospace, Menlo, monospace;
+
+  --a-whisper: 12px;
+  --a-murmur: 12.5px;
+  --speaking-softly: 14px;
+  --speaking: 15px;
+  --a-call: 18px;
+  --a-name: 36px;
+  --a-name-in-passing: 20px;
+  --room-to-breathe: 1.6;
+
+  --a-seed: 4px;
+  --a-sprout: 8px;
+  --a-twig: 12px;
+  --a-branch: 16px;
+  --a-bough: 20px;
+  --a-grove: 48px;
+  --open-sky: 64px;
+
+  --as-far-as-the-eye-reads: 680px;
+  --a-hairline: 1px;
+  --attention: 2px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --the-clearing: #121212;
+    --the-heartwood: #ececea;
+    --the-understory: #b8b8b5;
+    --the-lichen: #5a5a58;
+    --a-blush: #3a1218;
+    --them: #6e6e6c;
+    --us: #6fd38d;
+    --green-shade: #1a1c1a;
+    --green-ink: #d6f2dd;
+    --green-bright: #7fd897;
+    --green-soft: #a7e3b6;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  overflow-x: clip;
+}
+
+html {
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  margin: 0;
+  background: var(--the-clearing);
+  color: var(--the-heartwood);
+  font-family: var(--the-voice);
+  font-size: var(--speaking);
+  line-height: var(--room-to-breathe);
+  font-variant-numeric: tabular-nums;
+  text-wrap: pretty;
+}
+
+::selection {
+  background: var(--a-blush);
+  color: var(--the-heartwood);
+}
+
+main {
+  max-width: calc(var(--as-far-as-the-eye-reads) + 2 * var(--a-bough));
+  margin-inline: auto;
+  padding: var(--open-sky) var(--a-bough);
+}
+
+h1 {
+  margin: 0 0 var(--a-bough);
+  font-size: var(--a-name);
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  line-height: 1.1;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+.rooted {
+  display: flex;
+  align-items: center;
+  gap: var(--a-twig);
+}
+
+.masthead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--a-twig) var(--a-branch);
+  margin-block-end: var(--a-bough);
+}
+
+.masthead > .rooted {
+  flex: none;
+}
+
+.masthead h1 {
+  margin: 0;
+  font-size: clamp(28px, 9vw, var(--a-name));
+}
+
+.trail {
+  display: flex;
+  align-items: center;
+  gap: var(--a-branch);
+  white-space: nowrap;
+}
+
+.trail [aria-current] {
+  font-weight: 500;
+  text-decoration: none;
+}
+
+@media (max-width: 480px) {
+  .masthead .rooted {
+    gap: var(--a-sprout);
+  }
+
+  .trail {
+    gap: var(--a-twig);
+    font-size: var(--speaking-softly);
+  }
+
+  .trail .homeward {
+    display: none;
+  }
+}
+
+.deeper {
+  margin-block-end: var(--a-grove);
+}
+
+.deeper .rooted {
+  font-size: var(--a-name-in-passing);
+  font-weight: 600;
+  gap: var(--a-sprout);
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  text-decoration: none;
+}
+
+.growth {
+  display: block;
+  flex: none;
+  width: 1.1em;
+  height: 1.1em;
+}
+
+.growth.still {
+  border-radius: 50% 50% 46% 46% / 58% 58% 42% 42%;
+  background: radial-gradient(circle at 36% 30%, var(--green-above) 0%, var(--green) 45%, var(--green-below) 100%);
+  transform: scale(0.6);
+}
+
+h2 {
+  margin: var(--a-grove) 0 var(--a-twig);
+  padding-block-start: var(--a-bough);
+  border-block-start: var(--a-hairline) solid var(--the-heartwood);
+  font-size: var(--a-call);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.3;
+}
+
+p,
+pre {
+  margin: 0 0 var(--a-bough);
+}
+
+a {
+  color: var(--the-heartwood);
+  text-decoration: underline;
+  text-decoration-color: var(--the-lichen);
+  text-underline-offset: 3px;
+}
+
+a:hover {
+  text-decoration-color: var(--the-heartwood);
+}
+
+a[target="_blank"]::after {
+  content: " ↗";
+  color: var(--the-understory);
+  font-size: 11px;
+}
+
+:where(a, [tabindex]):focus-visible {
+  outline: var(--attention) solid var(--the-heartwood);
+  outline-offset: 2px;
+}
+
+.chart {
+  margin: 0 0 var(--a-bough);
+}
+
+.key {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--a-seed) var(--a-bough);
+  margin: var(--a-sprout) 0 var(--a-branch);
+  padding: 0;
+  list-style: none;
+  color: var(--the-understory);
+  font-size: var(--a-whisper);
+}
+
+.key li {
+  display: flex;
+  align-items: center;
+  gap: var(--a-sprout);
+}
+
+.blaze {
+  flex: none;
+  width: 8px;
+  height: 8px;
+}
+
+.them {
+  --colour-of: var(--them);
+}
+
+.us {
+  --colour-of: var(--us);
+}
+
+.blaze,
+.reach {
+  background: var(--colour-of);
+}
+
+.rings {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content;
+  align-items: center;
+  column-gap: var(--a-twig);
+  row-gap: var(--a-sprout);
+}
+
+.rings .reading {
+  grid-column: 1 / -1;
+  margin: var(--a-bough) 0 0;
+  color: var(--the-understory);
+}
+
+.rings .reading:first-child {
+  margin-block-start: 0;
+}
+
+.rings .reading b {
+  margin-inline-end: var(--a-seed);
+  color: var(--the-heartwood);
+  font-weight: 600;
+}
+
+.rings .girth {
+  color: var(--the-understory);
+  font-size: var(--speaking-softly);
+  line-height: 1.35;
+  text-align: end;
+  white-space: nowrap;
+}
+
+.rings .girth b {
+  color: var(--the-heartwood);
+  font-weight: 500;
+}
+
+.lane {
+  position: relative;
+  display: block;
+  height: 22px;
+}
+
+.reach {
+  position: absolute;
+  inset-inline-start: 0;
+  width: calc(var(--how-far) * 1%);
+  min-width: 2px;
+  height: 10px;
+}
+
+.reach.us {
+  inset-block-start: 0;
+}
+
+.reach.them {
+  inset-block-end: 0;
+}
+
+.in-the-margin {
+  margin: var(--a-sprout) 0 0;
+  color: var(--the-understory);
+  font-size: var(--a-whisper);
+  line-height: 1.5;
+}
+
+pre {
+  overflow-x: auto;
+  padding: var(--a-twig) var(--a-branch);
+  background: var(--green-shade);
+  color: var(--green-ink);
+  font-family: var(--the-machine);
+  font-size: var(--a-murmur);
+  font-variant-ligatures: none;
+  line-height: 1.6;
+}
+
+pre code {
+  font: inherit;
+}
+
+pre .word {
+  color: var(--green-bright);
+  font-weight: 500;
+}
+
+pre .said {
+  color: var(--green-soft);
+}
+
+pre ::selection {
+  background: var(--green-above);
+  color: var(--green-below);
+}
+
+@media (max-width: 480px) {
+  main {
+    padding-block-start: var(--a-grove);
+  }
+}
