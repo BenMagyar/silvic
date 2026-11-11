@@ -17,11 +17,12 @@ dependencies = ["numpy"]
 dynamic = ["version"]
 
 [project.optional-dependencies]
-ray = ["ray[default]>=2.40", "pyarrow"]
+# silvic.ray reads `ray.data` datasets (Ray's `data` extra) and hashes and sorts them with pandas and pyarrow.
+ray = ["ray[data,default]>=2.40", "pyarrow", "pandas"]
 pandas = ["pandas"]
 sklearn = ["scikit-learn"]
 lightgbm = ["lightgbm"]
-test = ["pytest", "pandas", "pyarrow", "scikit-learn", "lightgbm", "ray[default]>=2.40"]
+test = ["pytest", "pandas", "pyarrow", "scikit-learn", "lightgbm", "ray[data,default]>=2.40"]
 
 [tool.maturin]
 python-source = "python"

@@ -6,7 +6,8 @@ to the ``**kwargs`` value, so the core never sees both. ``n_jobs=None`` uses eve
 
 The estimators subclass scikit-learn's ``BaseEstimator`` and mixins when scikit-learn is importable, and work without
 it. ``SilvicClassifier`` is binary only (silvic has no multiclass objective); ``class_weight`` becomes sample weights
-as in LightGBM. ``init_score``, ``init_model`` and callable objectives or metrics are not supported.
+as in LightGBM. ``init_model`` (a fitted estimator, ``Booster``, model file or model text) continues training as in
+``silvic.train``. ``init_score`` and callable objectives or metrics are not supported.
 """
 
 import os
@@ -193,8 +194,8 @@ class SilvicModel(_Base):
     ):
         if init_score is not None or eval_init_score is not None:
             raise ValueError("silvic does not support init_score")
-        if init_model is not None:
-            raise ValueError("silvic does not support init_model")
+        if isinstance(init_model, SilvicModel):
+            init_model = init_model.booster_
         params = params if params is not None else self._training_params(eval_metric)
         self._n_features = int(np.shape(X)[1])
         train_set = Dataset(
@@ -237,6 +238,7 @@ class SilvicModel(_Base):
             valid_sets=valid_sets,
             valid_names=eval_names,
             callbacks=callbacks,
+            init_model=init_model,
         )
         self._evals_result = evals_result
         return self

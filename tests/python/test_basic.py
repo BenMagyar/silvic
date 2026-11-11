@@ -91,6 +91,72 @@ def test_training_is_reproducible():
     assert first.model_to_string() == second.model_to_string()
 
 
+CONTINUE_PARAMS = {
+    **BASE_PARAMS,
+    "objective": "lambdarank",
+    "device_type": "cpu",
+    "bagging_fraction": 0.7,
+    "bagging_freq": 3,
+    "feature_fraction": 0.8,
+}
+
+
+def test_continued_training_equals_one_run(ranking, tmp_path):
+    X, y, group = ranking
+
+    def fit(rounds, init_model=None, callbacks=None):
+        train_set = silvic.Dataset(X, label=y, group=group)
+        return silvic.train(
+            dict(CONTINUE_PARAMS), train_set, rounds, init_model=init_model, callbacks=callbacks, verbose_eval=False
+        )
+
+    whole = fit(30)
+    first = fit(20)
+    seen = []
+    continued = fit(10, init_model=first, callbacks=[lambda env: seen.append((env.iteration, env.end_iteration))])
+    assert continued.num_trees() == 30
+    assert continued.model_to_string() == whole.model_to_string()
+    assert seen == [(i, 30) for i in range(20, 30)]
+    path = tmp_path / "first.txt"
+    first.save_model(path)
+    assert fit(10, init_model=path).model_to_string() == whole.model_to_string()
+    assert fit(10, init_model=str(path)).model_to_string() == whole.model_to_string()
+    assert fit(10, init_model=first.model_to_string()).model_to_string() == whole.model_to_string()
+
+
+def test_continued_training_records_its_iterations(ranking):
+    X, y, group = ranking
+    train_set = silvic.Dataset(X, label=y, group=group)
+    first = silvic.train(dict(CONTINUE_PARAMS), train_set, 5, verbose_eval=False)
+    evals = {}
+    silvic.train(
+        dict(CONTINUE_PARAMS),
+        train_set,
+        4,
+        valid_sets=[train_set],
+        init_model=first,
+        evals_result=evals,
+        verbose_eval=False,
+    )
+    assert len(evals["training"]["ndcg@1"]) == 4
+
+
+def test_init_model_with_other_objective_raises(ranking):
+    X, y, group = ranking
+    params = {**BASE_PARAMS, "objective": "regression"}
+    regression = silvic.train(params, silvic.Dataset(X, label=y), 2, verbose_eval=False)
+    ranking_set = silvic.Dataset(X, label=y, group=group)
+    with pytest.raises(ValueError):
+        silvic.train(dict(CONTINUE_PARAMS), ranking_set, 2, init_model=regression, verbose_eval=False)
+
+
+def test_sklearn_init_model(ranking):
+    X, y, group = ranking
+    first = silvic.SilvicRanker(n_estimators=5, verbosity=-1).fit(X, y, group=group)
+    second = silvic.SilvicRanker(n_estimators=3, verbosity=-1).fit(X, y, group=group, init_model=first)
+    assert second.booster_.num_trees() == 8
+
+
 def test_pickle_round_trip(tmp_path):
     booster, X, _ = _train_case("binary")
     restored = pickle.loads(pickle.dumps(booster))
@@ -214,7 +280,6 @@ def test_unknown_param_raises_value_error(regression):
     [
         {"fobj": lambda preds, data: (preds, preds)},
         {"feval": lambda preds, data: ("x", 0.0, True)},
-        {"init_model": "model.txt"},
         {"early_stopping_rounds": 5},
         {"callbacks": [lightgbm.early_stopping(5)]},
     ],

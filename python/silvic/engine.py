@@ -5,16 +5,42 @@ LightGBM. ``verbose_eval`` keeps LightGBM 3.3.5's meaning: by default the evalua
 unless ``callbacks`` are given; an int prints every that many iterations. A validation set that *is* the training
 set is evaluated as ``training`` (or its ``valid_names`` entry), as in LightGBM.
 
-Custom objectives (``fobj``), custom metrics (``feval``), continued training (``init_model``), early stopping and
-``learning_rates`` are outside silvic's scope and raise ``ValueError``.
+``init_model`` (a ``Booster``, a model file path or model text) continues training as in LightGBM: its trees are
+kept and ``num_boost_round`` trees are added, with callbacks seeing iterations ``k .. k + num_boost_round - 1`` for a
+model of ``k`` trees. Unlike LightGBM, silvic replays the model's trees onto the training scores exactly and keys
+bagging, feature sampling and gradient quantization by the absolute iteration, so continuing a model on the data it
+was trained on equals training every tree in one run, byte for byte (``num_iterations`` in the model's
+``parameters:`` block counts every tree). The model must have the training set's objective and feature count.
+
+Custom objectives (``fobj``), custom metrics (``feval``), early stopping and ``learning_rates`` are outside silvic's
+scope and raise ``ValueError``.
 """
 
 import collections
+import os
+from pathlib import Path
 
 from . import _params
 from . import _silvic
 from .basic import Booster, Dataset, _dump_pandas_categorical
 from .callback import CallbackEnv, log_evaluation, record_evaluation
+
+
+def _init_model_text(init_model):
+    """Model text from a ``Booster``, a model file path or model text (which, unlike a path, spans lines)."""
+    if init_model is None:
+        return None
+    if isinstance(init_model, Booster):
+        return init_model.model_to_string()
+    if isinstance(init_model, str) and "\n" in init_model:
+        return init_model
+    if isinstance(init_model, (str, os.PathLike)):
+        return Path(init_model).read_text()
+    raise TypeError(f"init_model must be a Booster, a model file path or model text, got {type(init_model).__name__}")
+
+
+def _num_trees(model_str):
+    return 0 if model_str is None else _silvic.Booster(model_str).num_trees
 
 
 def _resolve_num_iterations(params, num_boost_round):
@@ -64,12 +90,16 @@ def _prepare_callbacks(callbacks, verbose_eval, evals_result):
 
 
 class _IterationHook:
-    """The ``_silvic.train`` callback: builds LightGBM's ``CallbackEnv`` and runs the callbacks."""
+    """The ``_silvic.train`` callback: builds LightGBM's ``CallbackEnv`` and runs the callbacks.
 
-    def __init__(self, callbacks, params, num_iterations):
+    Iterations are absolute: ``begin_iteration`` is the number of trees of the model training continues from.
+    """
+
+    def __init__(self, callbacks, params, num_iterations, begin_iteration=0):
         self.callbacks = callbacks
         self.params = params
-        self.num_iterations = num_iterations
+        self.begin_iteration = begin_iteration
+        self.end_iteration = begin_iteration + num_iterations
         self.last_evals = []
 
     def __call__(self, iteration, evals):
@@ -78,8 +108,8 @@ class _IterationHook:
             model=None,
             params=self.params,
             iteration=iteration,
-            begin_iteration=0,
-            end_iteration=self.num_iterations,
+            begin_iteration=self.begin_iteration,
+            end_iteration=self.end_iteration,
             evaluation_result_list=evals,
         )
         for callback in self.callbacks:
@@ -142,25 +172,28 @@ def train(
     ``evals_result`` (3.3.5) and ``record_evaluation`` (4.x) both record the validation history.
     ``keep_training_booster`` has no effect: a silvic ``Booster`` is always a finished model.
     """
-    unsupported = (("fobj", fobj), ("feval", feval), ("init_model", init_model), ("learning_rates", learning_rates))
+    unsupported = (("fobj", fobj), ("feval", feval), ("learning_rates", learning_rates))
     for name, value in unsupported:
         if value is not None:
             raise ValueError(f"silvic does not support `{name}`")
     if not isinstance(train_set, Dataset):
         raise TypeError("Training only accepts Dataset object")
+    init_model_str = _init_model_text(init_model)
     params = dict(params or {})
     num_iterations = _resolve_num_iterations(params, num_boost_round)
     _reject_early_stopping(params, early_stopping_rounds)
     train_set._update_params(params).set_feature_name(feature_name).set_categorical_feature(categorical_feature)
     train_set.construct()
     valid = _validation_handles(train_set, valid_sets, valid_names, params)
-    hook = _IterationHook(_prepare_callbacks(callbacks, verbose_eval, evals_result), params, num_iterations)
+    callbacks = _prepare_callbacks(callbacks, verbose_eval, evals_result)
+    hook = _IterationHook(callbacks, params, num_iterations, begin_iteration=_num_trees(init_model_str))
     model_str = _silvic.train(
         _params.to_json(params),
         train_set._handle,
         valid,
         callback=hook,
         pandas_categorical=_dump_pandas_categorical(train_set.pandas_categorical),
+        init_model=init_model_str,
     )
     booster = Booster(params=params, model_str=model_str)
     booster.best_score = hook.best_score()

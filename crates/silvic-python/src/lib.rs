@@ -19,6 +19,7 @@ fn _silvic(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<collective::Listener>()?;
     module.add_class::<collective::Collective>()?;
     module.add_function(wrap_pyfunction!(training::train, module)?)?;
+    module.add_function(wrap_pyfunction!(training::validate_params, module)?)?;
     module.add_function(wrap_pyfunction!(training::available_devices, module)?)?;
     module.add_function(wrap_pyfunction!(collective::connect, module)?)?;
     Ok(())

@@ -17,13 +17,14 @@ pub mod metric;
 pub mod model;
 pub mod objective;
 pub mod quantize;
+mod replay;
 mod split;
 #[cfg(any(test, feature = "test-util"))]
 pub mod test_util;
 pub mod tree;
 
 pub use backend::{Backend, CpuBackend};
-pub use boosting::{train, IterationReport};
+pub use boosting::{train, train_from, IterationReport};
 pub use collective::{Collective, LocalCollective};
 pub use config::Params;
 pub use data::BinnedDataset;

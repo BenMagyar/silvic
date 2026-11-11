@@ -7,11 +7,11 @@ LightGBM's Python API.
 | silvic | LightGBM 3.3.5 / 4.x |
 | --- | --- |
 | `silvic.Dataset` | `lightgbm.Dataset` (dense numpy and pandas; lazy construction; `reference=`) |
-| `silvic.train` | `lightgbm.train` (no `fobj`, `feval`, `init_model`, early stopping) |
+| `silvic.train` | `lightgbm.train` (`init_model` continues bit-exactly; no `fobj`, `feval`, early stopping) |
 | `silvic.Booster` | `lightgbm.Booster` (`predict`, `model_to_string`, `save_model`, `feature_importance`, pickling) |
 | `silvic.log_evaluation`, `silvic.record_evaluation` | the LightGBM 4.x callbacks |
 | `SilvicRegressor`, `SilvicClassifier`, `SilvicRanker` | `LGBMRegressor`, `LGBMClassifier` (binary), `LGBMRanker` |
-| `silvic.ray.train` | distributed training over Ray actors (no LightGBM counterpart) |
+| `silvic.ray.train` | distributed training over Ray actors, resuming from checkpoints after worker loss (no LightGBM counterpart) |
 
 Models are LightGBM 3.3.5 model text; `Booster.to_lightgbm()` returns `lightgbm.Booster(model_str=...)`.
 

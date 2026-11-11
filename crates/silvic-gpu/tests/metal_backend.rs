@@ -771,3 +771,88 @@ fn lambdarank_training_matches_cpu_ndcg() {
         "ndcg@10: cpu {cpu_ndcg}, metal {gpu_ndcg}"
     );
 }
+
+/// Trains `params.num_iterations` trees on Metal from `init`; returns the model and the model at `checkpoint`.
+fn train_metal_from(
+    params: &Params,
+    init: Option<&silvic_core::Model>,
+    train: &BinnedDataset,
+    valid: &BinnedDataset,
+    backend: &mut dyn Backend,
+    checkpoint: usize,
+) -> (String, Option<silvic_core::Model>) {
+    let mut saved = None;
+    let mut on_iteration = |report: &silvic_core::IterationReport<'_>| {
+        if report.iteration == checkpoint {
+            saved = Some(report.model());
+        }
+        Ok(())
+    };
+    let model = silvic_core::train_from(
+        params,
+        init,
+        train,
+        &[("valid", valid)],
+        backend,
+        &mut LocalCollective,
+        &mut on_iteration,
+    )
+    .expect("train");
+    (model.to_lightgbm_string(), saved)
+}
+
+#[test]
+fn resumed_training_matches_uninterrupted_training() {
+    let mut rng = Rng(9);
+    let (l2_train, l2_valid) = regression_data(&mut rng, 20_000, 15);
+    let (rank_train, rank_params) = rank_data(&mut rng, 20_000, false);
+    let (raw_valid, label_valid, sizes_valid) = rank_raw(&mut rng, 5_000);
+    let rank_valid = construct_valid(&input(&raw_valid, &label_valid, false, Some(&sizes_valid)), &rank_train);
+    let Some(mut gpu) = metal_backend("resumed_training_matches_uninterrupted_training") else {
+        return;
+    };
+    let randomized = |params: Params| Params {
+        num_iterations: 30,
+        bagging_fraction: 0.8,
+        bagging_freq: 3,
+        feature_fraction: 0.8,
+        ..params
+    };
+    let cases = [
+        ("l2", randomized(Params::default()), &l2_train, &l2_valid),
+        ("lambdarank", randomized(rank_params), &rank_train, &rank_valid),
+    ];
+    for (case, params, train, valid) in cases {
+        let (full, _) = train_metal_from(&params, None, train, valid, &mut gpu, usize::MAX);
+        let first_params = Params {
+            num_iterations: 12,
+            ..params.clone()
+        };
+        let (_, checkpoint) = train_metal_from(&first_params, None, train, valid, &mut gpu, 11);
+        let text = checkpoint.expect("checkpoint").to_lightgbm_string();
+        let init = silvic_core::Model::from_lightgbm_string(&text).expect("checkpoint parses");
+        let rest_params = Params {
+            num_iterations: 18,
+            ..params.clone()
+        };
+        let (resumed, _) = train_metal_from(&rest_params, Some(&init), train, valid, &mut gpu, usize::MAX);
+        assert_eq!(full.matches("Tree=").count(), 30, "{case}: trees");
+        assert!(
+            resumed == full,
+            "{case}: resumed model text differs from the uninterrupted one"
+        );
+        if case == "l2" {
+            // L2 trains the same trees on both backends, so the CPU backend resumes the Metal checkpoint to the same
+            // model. (Lambdarank gradients only agree to f32 rounding.)
+            let (cpu_resumed, _) = train_metal_from(
+                &rest_params,
+                Some(&init),
+                train,
+                valid,
+                &mut CpuBackend::new(),
+                usize::MAX,
+            );
+            assert!(cpu_resumed == full, "{case}: cpu resumed from the metal checkpoint");
+        }
+    }
+}

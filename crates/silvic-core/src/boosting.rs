@@ -5,6 +5,12 @@
 //! scores and evaluates the validation sets. As in LightGBM the initial score (`BoostFromAverage`) is added to the
 //! scores up front and folded into the first tree as a bias; a first tree that cannot split becomes a constant tree
 //! holding it, and any later tree that cannot split ends training without being added.
+//!
+//! [`train_from`] continues an existing model (LightGBM `init_model`): the scores start from the initial score plus
+//! the model's trees replayed on the binned rows (`replay`), the first tree's bias taken back off, so they are the
+//! f32 scores the original training had; the iteration-keyed draws (bagging round, feature sample, quantization)
+//! continue at the model's tree count. A model checkpointed by silvic and continued on the same rows and parameters
+//! therefore trains the same trees as one uninterrupted run.
 
 use std::sync::Arc;
 
@@ -20,15 +26,33 @@ use crate::metric::{self, EvalResult};
 use crate::model::{Model, ModelObjective};
 use crate::objective;
 use crate::quantize::QuantSpec;
+use crate::replay;
 use crate::split::{self, HistScale, K_EPSILON};
 use crate::tree::Tree;
 
 /// What the iteration callback sees after each tree.
 #[derive(Debug, Clone, PartialEq)]
 pub struct IterationReport<'a> {
-    /// Zero-based.
+    /// Zero-based and global: an `init_model`'s trees count, so the first new tree after `k` of them is `k`.
     pub iteration: usize,
     pub evals: &'a [EvalResult],
+    head: &'a Model,
+    init_trees: &'a [Tree],
+    trees: &'a [Tree],
+}
+
+impl IterationReport<'_> {
+    /// The model as of this iteration: the `init_model`'s trees, then every tree trained so far. Built on demand
+    /// (O(trees)), for checkpoints.
+    pub fn model(&self) -> Model {
+        let mut trees = Vec::with_capacity(self.init_trees.len() + self.trees.len());
+        trees.extend_from_slice(self.init_trees);
+        trees.extend_from_slice(self.trees);
+        Model {
+            trees,
+            ..self.head.clone()
+        }
+    }
 }
 
 /// Trains `params.num_iterations` trees on `train`, evaluating `valid` after each. Every rank calls this with its own
@@ -44,11 +68,34 @@ pub fn train(
     collective: &mut dyn Collective,
     on_iteration: &mut dyn FnMut(&IterationReport<'_>) -> Result<()>,
 ) -> Result<Model> {
+    train_from(params, None, train, valid, backend, collective, on_iteration)
+}
+
+/// [`train`], continuing `init_model` when there is one (LightGBM `init_model`): `params.num_iterations` new trees
+/// follow its trees, and the returned model holds both. Its `num_iterations` parameter is the total, so a run
+/// resumed from a checkpoint writes the same model text as the uninterrupted run; `pandas_categorical` is kept from
+/// `init_model`.
+///
+/// `init_model` must have the objective (and sigmoid) and the feature count of `params` and `train`, else
+/// [`SilvicError::Config`]. A model trained by silvic on bins from the same sample continues exactly; a model
+/// trained elsewhere (other bins) continues from approximately replayed scores (see `replay`). The initial score is
+/// recomputed from `params` and `train` and taken off the first tree's leaves, as `boost_from_average` folded it in.
+pub fn train_from(
+    params: &Params,
+    init_model: Option<&Model>,
+    train: &BinnedDataset,
+    valid: &[(&str, &BinnedDataset)],
+    backend: &mut dyn Backend,
+    collective: &mut dyn Collective,
+    on_iteration: &mut dyn FnMut(&IterationReport<'_>) -> Result<()>,
+) -> Result<Model> {
     let pool = thread_pool(params.num_threads)?;
     if let Some(pool) = &pool {
         backend.set_thread_pool(Arc::clone(pool));
     }
     let setup = objective::setup(params, train)?;
+    let init_trees: &[Tree] = init_model.map_or(&[], |m| &m.trees);
+    let head = model_head(params, &setup, train, init_model)?;
     let valid_sets: Vec<&BinnedDataset> = valid.iter().map(|(_, data)| *data).collect();
     backend.load(train, &valid_sets, &setup)?;
     let init_score = install(pool.as_deref(), || {
@@ -59,7 +106,11 @@ pub fn train(
     for dataset in 0..=valid.len() {
         backend.init_scores(dataset, init_score)?;
     }
-    tracing::debug!(backend = %backend.name(), init_score, "training started");
+    for (index, tree) in init_trees.iter().enumerate() {
+        let bias = if index == 0 { init_score } else { 0.0 };
+        backend.add_tree(&replay::device_tree(tree, train, bias)?)?;
+    }
+    tracing::debug!(backend = %backend.name(), init_score, init_trees = init_trees.len(), "training started");
     let mut trainer = Trainer {
         params,
         train,
@@ -68,9 +119,11 @@ pub fn train(
         pool: pool.as_deref(),
         constant_hessian: objective::constant_hessian(&setup, train.weight.as_deref()),
         init_score,
+        prior_trees: init_trees.len(),
         trees: Vec::new(),
     };
-    for iteration in 0..params.num_iterations {
+    let start = init_trees.len();
+    for iteration in start..start + params.num_iterations {
         if !trainer.train_one_iter(backend, collective, iteration)? {
             break;
         }
@@ -84,9 +137,57 @@ pub fn train(
         on_iteration(&IterationReport {
             iteration,
             evals: &evals,
+            head: &head,
+            init_trees,
+            trees: &trainer.trees,
         })?;
     }
-    Ok(trainer.into_model(&setup))
+    let mut model = head;
+    model.trees = init_trees.to_vec();
+    model.trees.append(&mut trainer.trees);
+    Ok(model)
+}
+
+/// The model without trees: objective, features and parameters, checked against `init_model`.
+fn model_head(
+    params: &Params,
+    setup: &ObjectiveSetup,
+    train: &BinnedDataset,
+    init_model: Option<&Model>,
+) -> Result<Model> {
+    let objective = match setup {
+        ObjectiveSetup::Regression => ModelObjective::Regression,
+        ObjectiveSetup::Binary { sigmoid } => ModelObjective::Binary { sigmoid: *sigmoid },
+        ObjectiveSetup::LambdaRank { .. } => ModelObjective::LambdaRank,
+    };
+    let mut parameters = params.model_parameters();
+    if let Some(init) = init_model {
+        if init.objective != objective {
+            return Err(SilvicError::config(format!(
+                "init_model has objective {:?}, the parameters train {objective:?}",
+                init.objective
+            )));
+        }
+        if init.num_features() != train.features.len() {
+            return Err(SilvicError::config(format!(
+                "init_model has {} features, the training data has {}",
+                init.num_features(),
+                train.features.len()
+            )));
+        }
+        let total = init.num_trees() + params.num_iterations;
+        if let Some((_, value)) = parameters.iter_mut().find(|(key, _)| key == "num_iterations") {
+            *value = total.to_string();
+        }
+    }
+    Ok(Model {
+        objective,
+        feature_names: train.features.iter().map(|f| f.name.clone()).collect(),
+        feature_infos: train.features.iter().map(|f| f.bins.info_string()).collect(),
+        trees: Vec::new(),
+        parameters,
+        pandas_categorical: init_model.and_then(|m| m.pandas_categorical.clone()),
+    })
 }
 
 fn thread_pool(num_threads: usize) -> Result<Option<Arc<ThreadPool>>> {
@@ -116,6 +217,8 @@ struct Trainer<'a> {
     pool: Option<&'a ThreadPool>,
     constant_hessian: Option<f64>,
     init_score: f64,
+    /// Trees of the `init_model`, before `trees`.
+    prior_trees: usize,
     trees: Vec<Tree>,
 }
 
@@ -199,20 +302,23 @@ impl Trainer<'_> {
     /// `GBDT::TrainOneIter`; a later one is dropped. Either way training ends.
     fn single_leaf(&mut self, iteration: usize) {
         tracing::debug!(iteration, "no split with positive gain; training stops");
-        if self.trees.is_empty() {
+        if self.prior_trees + self.trees.len() == 0 {
             let mut tree = Tree::new();
             tree.as_constant(self.init_score);
             self.trees.push(tree);
         }
     }
 
-    /// Shrinkage, the score update (without the bias, already in the scores) and the first tree's bias.
+    /// Shrinkage, the first tree's bias, and the score update (without the bias, already in the scores).
     fn add(&mut self, backend: &mut dyn Backend, mut grown: GrownTree) -> Result<()> {
         grown.tree.shrink(self.params.learning_rate);
-        backend.add_tree(&grown.device_tree())?;
-        if self.trees.is_empty() && self.init_score != 0.0 {
+        let mut device = grown.device_tree();
+        if self.prior_trees + self.trees.len() == 0 && self.init_score != 0.0 {
             grown.tree.add_bias(self.init_score);
+            // As `train_from` replays it, so a resumed run adds bit for bit the same scores.
+            device.leaf_values = replay::leaf_values(&grown.tree, self.init_score);
         }
+        backend.add_tree(&device)?;
         self.trees.push(grown.tree);
         Ok(())
     }
@@ -227,21 +333,5 @@ impl Trainer<'_> {
             })?);
         }
         Ok(evals)
-    }
-
-    fn into_model(self, setup: &ObjectiveSetup) -> Model {
-        let objective = match setup {
-            ObjectiveSetup::Regression => ModelObjective::Regression,
-            ObjectiveSetup::Binary { sigmoid } => ModelObjective::Binary { sigmoid: *sigmoid },
-            ObjectiveSetup::LambdaRank { .. } => ModelObjective::LambdaRank,
-        };
-        Model {
-            objective,
-            feature_names: self.train.features.iter().map(|f| f.name.clone()).collect(),
-            feature_infos: self.train.features.iter().map(|f| f.bins.info_string()).collect(),
-            trees: self.trees,
-            parameters: self.params.model_parameters(),
-            pandas_categorical: None,
-        }
     }
 }
