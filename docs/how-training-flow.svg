@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 300" role="img" aria-labelledby="title description">
+  <title id="title">Two separate histogram additions versus one packed addition</title>
+  <desc id="description">LightGBM by default adds a row's floating gradient and Hessian separately to their histogram bins. Silvic first quantizes and packs the paired values into one integer, then makes one addition to a histogram bin. The paired colors identify the same two values on both sides.</desc>
+  <style>
+    :root { color-scheme: light dark; --ink: #203b2b; --muted: #46644e; --line: #719077; --green: #267344; --deep: #174f32; --soft: #a5c9a9; --wash: #e3f0e2; --paper: #ffffff; }
+    @media (prefers-color-scheme: dark) { :root { --ink: #edf5eb; --muted: #c3d8c3; --line: #89ac8f; --green: #8cd19a; --deep: #c0eabf; --soft: #638e6b; --wash: #253b2b; --paper: #17231b; } }
+    text { font: 600 14px system-ui, sans-serif; fill: var(--ink); }
+    .caption { fill: var(--muted); }
+    .accent { fill: var(--deep); }
+  </style>
+  <text x="24" y="29">LightGBM default</text>
+  <text x="200" y="29">silvic</text>
+  <path d="M180 45V283" stroke="var(--line)" stroke-width="1"/>
+  <text x="24" y="53" class="caption">row values</text>
+  <text x="200" y="53" class="caption">row values</text>
+  <rect x="24" y="65" width="136" height="14" rx="7" fill="var(--green)"/>
+  <rect x="24" y="86" width="136" height="14" rx="7" fill="var(--soft)"/>
+  <rect x="200" y="65" width="136" height="14" rx="7" fill="var(--green)"/>
+  <rect x="200" y="86" width="136" height="14" rx="7" fill="var(--soft)"/>
+  <text x="24" y="134" class="caption">separate sums</text>
+  <text x="200" y="134" class="caption">quantize + pack</text>
+  <g fill="var(--paper)" stroke="var(--line)" stroke-width="1.3">
+    <rect x="110" y="150" width="50" height="30" rx="4"/>
+    <rect x="110" y="207" width="50" height="30" rx="4"/>
+    <rect x="200" y="149" width="60" height="53" rx="5"/>
+    <rect x="275" y="149" width="61" height="53" rx="5"/>
+    <rect x="287" y="248" width="49" height="37" rx="4"/>
+  </g>
+  <rect x="24" y="156" width="41" height="18" rx="9" fill="var(--green)"/>
+  <rect x="24" y="213" width="41" height="18" rx="9" fill="var(--soft)"/>
+  <g fill="var(--wash)">
+    <rect x="115" y="155" width="12" height="20" rx="2"/><rect x="130" y="155" width="12" height="20" rx="2"/><rect x="145" y="155" width="10" height="20" rx="2"/>
+    <rect x="115" y="212" width="12" height="20" rx="2"/><rect x="130" y="212" width="12" height="20" rx="2"/><rect x="145" y="212" width="10" height="20" rx="2"/>
+    <rect x="292" y="253" width="10" height="27" rx="2"/><rect x="305" y="253" width="13" height="27" rx="2"/><rect x="321" y="253" width="10" height="27" rx="2"/>
+  </g>
+  <rect x="130" y="155" width="12" height="20" rx="2" fill="var(--green)"/>
+  <rect x="130" y="212" width="12" height="20" rx="2" fill="var(--soft)"/>
+  <g stroke="var(--deep)" stroke-width="2.5" stroke-linecap="round">
+    <path d="M78 165H94 M86 157V173 M78 222H94 M86 214V230 M260 266H276 M268 258V274"/>
+  </g>
+  <g fill="var(--green)">
+    <rect x="205" y="158" width="10" height="14" rx="2"/><rect x="218" y="158" width="10" height="14" rx="2"/><rect x="231" y="158" width="10" height="14" rx="2"/><rect x="244" y="158" width="10" height="14" rx="2"/>
+    <rect x="281" y="155" width="49" height="18" rx="2"/>
+    <rect x="206" y="250" width="43" height="14" rx="2"/>
+    <rect x="305" y="255" width="13" height="11" rx="1"/>
+  </g>
+  <g fill="var(--soft)">
+    <rect x="205" y="179" width="10" height="14" rx="2"/><rect x="218" y="179" width="10" height="14" rx="2"/><rect x="231" y="179" width="10" height="14" rx="2"/><rect x="244" y="179" width="10" height="14" rx="2"/>
+    <rect x="281" y="178" width="49" height="18" rx="2"/>
+    <rect x="206" y="268" width="43" height="14" rx="2"/>
+    <rect x="305" y="268" width="13" height="11" rx="1"/>
+  </g>
+  <rect x="200" y="245" width="55" height="42" rx="5" fill="none" stroke="var(--line)" stroke-width="1.3"/>
+  <text x="24" y="272" class="accent">two adds</text>
+  <text x="200" y="231" class="accent">one add</text>
+</svg>

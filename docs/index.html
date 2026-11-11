@@ -11,7 +11,8 @@
   <link rel="alternate" type="application/rss+xml" title="silvic changelog" href="feed.xml">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600&amp;family=JetBrains+Mono&amp;display=swap">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Faustina:wght@400;500;600&amp;family=JetBrains+Mono:wght@400&amp;display=swap" media="print" onload="this.media='all'">
+  <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Faustina:wght@400;500;600&amp;family=JetBrains+Mono:wght@400&amp;display=swap"></noscript>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -19,55 +20,55 @@
     <header class="masthead">
       <h1 class="rooted"><canvas class="growth" width="40" height="40" aria-hidden="true"></canvas>silvic</h1>
       <nav class="trail" aria-label="silvic">
+        <a href="how.html">How</a>
         <a href="docs/">Docs</a>
         <a href="changelog.html">Changelog</a>
       </nav>
     </header>
-    <p>Gradient boosting in Rust that trains the models <a href="https://lightgbm.readthedocs.io" target="_blank" rel="noreferrer">LightGBM</a> trains, on the CPU, Apple Metal or NVIDIA CUDA, in one process or across <a href="https://www.ray.io" target="_blank" rel="noreferrer">Ray</a> actors that resume when a node is lost. It writes LightGBM 3.3.5 model text, so LightGBM, its SHAP values and lleaves serve its models unchanged, and it scores LightGBM’s models itself, in Python or as a <a href="docs/silvic-triton.html">Triton backend</a>, several times faster, with LightGBM’s predictions bit for bit. Its histograms are integer sums of quantized gradients: every run gives the same model, and Ray workers train the model one process would.</p>
+    <header class="landing-intro">
+      <p>Train and serve gradient-boosted trees in Rust with LightGBM-compatible model files.</p>
+      <p>Training runs on CPU, Apple Metal, NVIDIA CUDA and AWS Neuron. Serving runs on CPU, CUDA and Neuron (float32).</p>
+    </header>
 
-    <h2>Against LightGBM</h2>
-    <figure class="chart">
-      <ul class="key"><li><span class="blaze us"></span>silvic</li><li><span class="blaze them"></span>LightGBM 4.7</li></ul>
-      <div class="rings" role="img" aria-label="Metal on 9 million rows, 200 trees: silvic 23.2 s, LightGBM 134.4 s. Metal on 1.8 million rows, 500 trees: silvic 23.0 s, LightGBM 65.9 s. CPU on 9 million rows, 200 trees: silvic 97.5 s, LightGBM 134.4 s. Validation NDCG at 12 on 9 million rows: silvic 0.8415, LightGBM 0.8387.">
-        <p class="reading"><b>Metal, 9M rows</b> 200 trees in 23 s. 5.8× faster.</p>
-        <span class="lane"><span class="reach us" style="--how-far: 17.26"></span><span class="reach them" style="--how-far: 100"></span></span>
-        <span class="girth"><b>23.2 s</b><br>134.4 s</span>
-
-        <p class="reading"><b>Metal, 1.8M rows</b> 500 trees in 23 s. 2.9× faster.</p>
-        <span class="lane"><span class="reach us" style="--how-far: 34.90"></span><span class="reach them" style="--how-far: 100"></span></span>
-        <span class="girth"><b>23.0 s</b><br>65.9 s</span>
-
-        <p class="reading"><b>CPU, 9M rows</b> The same 200 trees without a GPU. 1.4× faster.</p>
-        <span class="lane"><span class="reach us" style="--how-far: 72.54"></span><span class="reach them" style="--how-far: 100"></span></span>
-        <span class="girth"><b>97.5 s</b><br>134.4 s</span>
-
-        <p class="reading"><b>Accuracy</b> Validation NDCG@12 on the 9M rows, from the Metal model.</p>
-        <span class="lane"><span class="reach us" style="--how-far: 100"></span><span class="reach them" style="--how-far: 99.67"></span></span>
-        <span class="girth"><b>0.8415</b><br>0.8387</span>
+    <h2 id="training">Training</h2>
+    <figure class="chart" aria-labelledby="training" style="--range: 600">
+      <p class="chart-context">End-to-end seconds</p>
+      <div class="chart-plot">
+        <div class="bar-scale" aria-hidden="true"><span>0</span><span>200</span><span>400</span><span>600</span></div>
+        <ul class="bars" role="list">
+          <li><span class="bar-label">silvic · CUDA · native single</span><span class="bar-value">27.26 <span>s</span></span><span class="bar-track" aria-hidden="true"><span class="bar us cuda" style="--elapsed: 27.263413834999938"></span></span></li>
+          <li><span class="bar-label">silvic · CPU · Ray 2 workers</span><span class="bar-value">255.35 <span>s</span></span><span class="bar-track" aria-hidden="true"><span class="bar us cpu" style="--elapsed: 255.34644281599685"></span></span></li>
+          <li><span class="bar-label">LightGBM · CPU · Ray 2 workers</span><span class="bar-value">291.87 <span>s</span></span><span class="bar-track" aria-hidden="true"><span class="bar them cpu" style="--elapsed: 291.86502285499955"></span></span></li>
+          <li><span class="bar-label">silvic · CPU · native single</span><span class="bar-value">400.22 <span>s</span></span><span class="bar-track" aria-hidden="true"><span class="bar us cpu" style="--elapsed: 400.21604598099975"></span></span></li>
+          <li><span class="bar-label">LightGBM · CPU · native single</span><span class="bar-value">469.94 <span>s</span></span><span class="bar-track" aria-hidden="true"><span class="bar them cpu" style="--elapsed: 469.937796746"></span></span></li>
+        </ul>
       </div>
-      <p class="in-the-margin">Lambdarank, 53 leaves, on synthetic learning-to-rank data with 136 features, on an Apple M4 Pro; LightGBM 4.7.0 on all 14 cores. Times include binning. Bars start from zero and use separate scales.</p>
     </figure>
 
-    <h2>Scoring</h2>
-    <figure class="chart">
-      <ul class="key"><li><span class="blaze us"></span>silvic.serve</li><li><span class="blaze them"></span>the engine named</li></ul>
-      <div class="rings" role="img" aria-label="Scoring 3,000 rows with 2,000 trees on one thread, median: silvic.serve 12.2 ms, lleaves 1.1.0 64.0 ms, treelite 104.1 ms, LightGBM 581.6 ms.">
-        <p class="reading"><b>lleaves 1.1.0</b> 3,000 rows through 2,000 trees in 12 ms. 5.2× faster.</p>
-        <span class="lane"><span class="reach us" style="--how-far: 19.06"></span><span class="reach them" style="--how-far: 100"></span></span>
-        <span class="girth"><b>12.2 ms</b><br>64.0 ms</span>
-
-        <p class="reading"><b>treelite 4.8</b> Compiled C, thresholds quantized. 8.5× faster.</p>
-        <span class="lane"><span class="reach us" style="--how-far: 11.72"></span><span class="reach them" style="--how-far: 100"></span></span>
-        <span class="girth"><b>12.2 ms</b><br>104.1 ms</span>
-
-        <p class="reading"><b>LightGBM 4.7</b> <code>predict</code> on one thread. 48× faster.</p>
-        <span class="lane"><span class="reach us" style="--how-far: 2.10"></span><span class="reach them" style="--how-far: 100"></span></span>
-        <span class="girth"><b>12.2 ms</b><br>581.6 ms</span>
+    <h2 id="scoring">Serving</h2>
+    <figure class="chart" aria-labelledby="scoring" style="--range: 30">
+      <p class="chart-context">Host input to host output · milliseconds</p>
+      <div class="chart-plot">
+        <div class="bar-scale" aria-hidden="true"><span>0</span><span>10</span><span>20</span><span>30</span></div>
+        <ul class="bars" role="list">
+          <li><span class="bar-label">nvForest · CUDA (f32)</span><span class="bar-value">0.542 <span>ms</span></span><span class="bar-track" aria-hidden="true"><span class="bar them cuda" style="--elapsed: 0.5421305000000001"></span></span></li>
+          <li><span class="bar-label">silvic.serve · CUDA (f32)</span><span class="bar-value">0.609 <span>ms</span></span><span class="bar-track" aria-hidden="true"><span class="bar us cuda" style="--elapsed: 0.60894"></span></span></li>
+          <li><span class="bar-label">silvic.serve · CUDA (f64)</span><span class="bar-value">0.979 <span>ms</span></span><span class="bar-track" aria-hidden="true"><span class="bar us cuda" style="--elapsed: 0.9788275"></span></span></li>
+          <li><span class="bar-label">nvForest · CUDA (f64)</span><span class="bar-value">1.329 <span>ms</span></span><span class="bar-track" aria-hidden="true"><span class="bar them cuda" style="--elapsed: 1.329278"></span></span></li>
+          <li><span class="bar-label">silvic.serve · CPU (AVX2)</span><span class="bar-value">2.121 <span>ms</span></span><span class="bar-track" aria-hidden="true"><span class="bar us cpu" style="--elapsed: 2.1213085"></span></span></li>
+          <li><span class="bar-label">lleaves 1.3 · CPU</span><span class="bar-value">7.416 <span>ms</span></span><span class="bar-track" aria-hidden="true"><span class="bar them cpu" style="--elapsed: 7.415888"></span></span></li>
+          <li><span class="bar-label">LightGBM 4.7 · CPU</span><span class="bar-value">26.986 <span>ms</span></span><span class="bar-track" aria-hidden="true"><span class="bar them cpu" style="--elapsed: 26.985609"></span></span></li>
+        </ul>
       </div>
-      <p class="in-the-margin">Median of 300 batches of 3,000 rows by 136 features, 2,000 lambdarank trees of 53 leaves, one thread on an Apple M4 Pro (NEON). Predictions equal LightGBM’s exactly; lleaves’ differ by up to 5e-14. On x86 silvic.serve runs AVX2, not yet timed.</p>
     </figure>
 
-    <h2>Use it</h2>
+    <details class="benchmark-details">
+      <summary>Benchmark details</summary>
+      <p><strong>Training.</strong> 1M synthetic learning-to-rank rows and 100k validation rows, 100 numerical float32 features, queries of 50; 1,000 lambdarank trees, 53 leaves, 63 bins. All engines ran sequentially on the same two Xeon Platinum 8259CL / Tesla T4 nodes. Native rows time direct single-process dataset construction, binning, fit, validation and serialization; Ray rows also include partitioning, transfer, actor or Trainer setup, TCP and teardown. Two CPU threads per process and one GPU per CUDA process. Median of three fits after a one-tree warmup; data generation and cluster provisioning excluded.</p>
+      <p><strong>Serving.</strong> One fixed 200-tree, 53-leaf model with 100 features. Median of 100 calls cycling through eight held-out 3,000-row batches after 10 warmups. Engines ran sequentially on one Xeon Platinum 8259CL / Tesla T4 host; CPU engines used two threads. Host input to host output includes CUDA transfers, allocation and synchronization; model loading and compilation excluded.</p>
+    </details>
+
+    <h2>Python API</h2>
     <pre tabindex="0"><code><span class="word">pip install</span> silvic
 <span class="word">pip install</span> <span class="said">"silvic[ray]"</span></code></pre>
     <pre tabindex="0"><code><span class="word">import</span> silvic
@@ -77,12 +78,17 @@ booster = silvic.train({<span class="said">"objective"</span>: <span class="said
 booster.save_model(<span class="said">"model.txt"</span>)</code></pre>
     <pre tabindex="0"><code><span class="word">import</span> silvic.ray
 
-booster = silvic.ray.train(params, ray.data.read_parquet(<span class="said">"s3://bucket/train/"</span>),
-                           label_column=<span class="said">"label"</span>, group_column=<span class="said">"query_id"</span>,
-                           num_workers=<span class="said">5</span>, use_gpu=<span class="word">True</span>)</code></pre>
+booster = silvic.ray.train(
+    params,
+    ray.data.read_parquet(<span class="said">"s3://bucket/train/"</span>),
+    label_column=<span class="said">"label"</span>,
+    group_column=<span class="said">"query_id"</span>,
+    num_workers=<span class="said">5</span>,
+    use_gpu=<span class="word">True</span>,
+)</code></pre>
     <pre tabindex="0"><code><span class="word">import</span> silvic.serve
 
-predictor = silvic.serve.Predictor(<span class="said">"model.txt"</span>)  # any LightGBM 3.x or 4.x model
+predictor = silvic.serve.Predictor(<span class="said">"model.txt"</span>)  # LightGBM 3.x or 4.x model
 scores = predictor.predict(candidates, num_threads=<span class="said">1</span>)</code></pre>
   </main>
   <script src="mark.js"></script>

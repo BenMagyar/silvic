@@ -6,7 +6,11 @@ members = ["crates/*"]
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.94.1"
-publish = false
+publish = true
+license = "MIT"
+authors = ["Ben Magyar <me@benmagyar.com>"]
+repository = "https://github.com/BenMagyar/silvic"
+homepage = "https://benmagyar.github.io/silvic/"
 
 [workspace.lints.clippy]
 cognitive_complexity = "warn"
@@ -19,11 +23,11 @@ lto = "thin"
 codegen-units = 1
 
 [workspace.dependencies]
-silvic-core = { path = "crates/silvic-core" }
-silvic-gpu = { path = "crates/silvic-gpu" }
-silvic-net = { path = "crates/silvic-net" }
-silvic-neuron = { path = "crates/silvic-neuron" }
-silvic-serve = { path = "crates/silvic-serve" }
+silvic-core = { version = "0.1.0", path = "crates/silvic-core" }
+silvic-gpu = { version = "0.1.0", path = "crates/silvic-gpu" }
+silvic-net = { version = "0.1.0", path = "crates/silvic-net" }
+silvic-neuron = { version = "0.1.0", path = "crates/silvic-neuron" }
+silvic-serve = { version = "0.1.0", path = "crates/silvic-serve" }
 thiserror = "2"
 rayon = "1.12"
 bytemuck = { version = "1.25", features = ["derive"] }

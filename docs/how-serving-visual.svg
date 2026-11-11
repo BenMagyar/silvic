@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 300" role="img" aria-labelledby="title description">
+  <title id="title">A leaf mask reveals the first matching leaf and its value</title>
+  <desc id="description">A translucent mask lies across four leaf tiles. Hatching fades leaves ruled out by threshold comparisons. The first remaining leaf is highlighted; its matching value is shown in a separate tile below. Numerical threshold positions can be reused to choose masks rather than repeatedly walking the tree.</desc>
+  <style>
+    :root { color-scheme: light dark; --ink: #213a28; --muted: #47614d; --line: #668775; --tile: #f3f8f1; --soft: #d7ead9; --selected: #205c36; --selected-ink: #fff; --hatch: #456f50; }
+    @media (prefers-color-scheme: dark) { :root { --ink: #e6f2e4; --muted: #b9d2bc; --line: #8aaa91; --tile: #25372b; --soft: #38573e; --selected: #a9ddb0; --selected-ink: #17271b; --hatch: #b5d5b9; } }
+    text { fill: var(--ink); font: 600 16px system-ui, sans-serif; }
+    .tile { fill: var(--tile); stroke: var(--line); stroke-width: 1.5; }
+    .survivor { fill: var(--soft); stroke: var(--selected); stroke-width: 1.5; }
+    .chosen { fill: var(--selected); }
+    .symbol { fill: none; stroke: var(--selected); stroke-width: 2.5; stroke-linecap: round; }
+    .chosen-symbol { fill: none; stroke: var(--selected-ink); stroke-width: 2.5; stroke-linecap: round; }
+  </style>
+  <defs>
+    <pattern id="masked" width="9" height="9" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <path d="M0 0V9" stroke="var(--hatch)" stroke-width="2" opacity=".75"/>
+    </pattern>
+  </defs>
+  <text x="20" y="41">Leaf mask</text>
+  <g>
+    <rect class="tile" x="28" y="84" width="66" height="62" rx="7" opacity=".4"/>
+    <rect class="tile" x="108" y="84" width="66" height="62" rx="7" opacity=".4"/>
+    <rect class="chosen" x="188" y="84" width="66" height="62" rx="7"/>
+    <rect class="survivor" x="268" y="84" width="66" height="62" rx="7"/>
+    <path class="symbol" d="M48 116h26 M128 116h26 M288 116h26" opacity=".6"/>
+    <path class="chosen-symbol" d="M208 116h26"/>
+    <rect x="28" y="84" width="66" height="62" rx="7" fill="url(#masked)"/>
+    <rect x="108" y="84" width="66" height="62" rx="7" fill="url(#masked)"/>
+    <rect x="21" y="76" width="320" height="78" rx="10" fill="none" stroke="var(--selected)" stroke-width="1.5" opacity=".85"/>
+  </g>
+  <text x="20" y="241">Value</text>
+  <rect class="chosen" x="188" y="205" width="66" height="62" rx="7"/>
+  <path class="chosen-symbol" d="M204 239h34" stroke-width="4"/>
+</svg>

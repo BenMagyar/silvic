@@ -1,6 +1,9 @@
 //! Trains through `CpuBackend` on synthetic data and compares lambdarank accuracy against LightGBM 4.7's validation
 //! NDCG@10 recorded by `fixtures/lambdarank_parity.py`, which generates the same rows from the same hash.
 
+#[path = "../src/test_util.rs"]
+mod test_util;
+
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
@@ -9,8 +12,8 @@ use silvic_core::collective::Collective;
 use silvic_core::data::{DatasetInput, DenseData, DenseMatrix, Layout};
 use silvic_core::metric::EvalResult;
 use silvic_core::quantize::{self, QuantSpec};
-use silvic_core::test_util::run_ranks;
 use silvic_core::{train, Backend, BinnedDataset, CpuBackend, LocalCollective, Model, Params, Result};
+use test_util::run_ranks;
 
 const SEED: u32 = 20_261_107;
 const VALID_ROW_OFFSET: u64 = 10_000_000;

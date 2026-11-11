@@ -1,8 +1,8 @@
 # silvic-serve
 
-Batch scoring of LightGBM models (`model.txt` from LightGBM 3.3.5 or 4.x, or from silvic), with predictions equal to
-LightGBM's bit for bit. `Predictor::new` compiles a `silvic_core::Model` in milliseconds; `predict` scores a dense
-matrix (f32 or f64, row- or column-major) on the calling thread or on rayon's pool.
+Batch scoring of LightGBM models (`model.txt` from LightGBM 3.3.5 or 4.x, or from silvic), with default float64
+predictions equal to LightGBM's bit for bit. `Predictor::new` compiles a `silvic_core::Model` in milliseconds;
+`predict` scores a dense matrix (f32 or f64, row- or column-major) on the calling thread or on rayon's pool.
 
 Each tree is QuickScorer's leaf bitvector (Lucchese et al., SIGIR 2015): leaves numbered left to right, and per node
 the bits of its left subtree, cleared in the rows that go right there; the lowest bit left is the exit leaf, so a tree
@@ -34,9 +34,8 @@ them), so every model `Model::from_lightgbm_string` accepts scores, those trees 
 | `Avx512` | x86-64 with AVX-512F and AVX-512BW (runtime detection) | 64 | no: ask for it by name |
 | `Portable` | any; plain Rust over u64 words (SWAR) | 32 | when nothing else runs |
 
-Every kernel gives the same predictions. The AVX-512 kernel compiles and passes clippy but has not run on AVX-512
-hardware yet, which is why `Kernel::detect` does not pick it: run this crate's tests on such a machine
-(`SILVIC_SERVE_EXPECT_KERNELS=portable,avx2,avx512 cargo test -p silvic-serve`) before selecting it.
+Every CPU kernel gives the same predictions. AVX-512 is opt-in rather than selected by `Kernel::detect`;
+AVX2 remains the x86-64 default. Compare them on the deployment workload before selecting AVX-512.
 
 ## Use it
 
@@ -54,12 +53,37 @@ let scores = predictor.predict(&rows, false, None, 1); // raw_score, num_trees, 
 From Python, `silvic.serve.Predictor(booster_or_text_or_path).predict(X, num_threads=1)`, or the lleaves drop-in
 `silvic.serve.Model(model_file="model.txt")` with `compile()` and `predict(X, n_jobs=1)`.
 
+## CUDA
+
+Enable the Rust feature `silvic-serve/cuda` and construct `CudaPredictor::new(&model, Some(0))`. Its
+`predict(&rows, raw_score, num_trees)` returns a `Result<Vec<f64>>`; `predict_raw` writes into a caller's buffer.
+The CUDA predictor retains the forest and reusable input/output buffers on the device. Blocks handle 32 rows;
+up to eight warps walk different trees concurrently and share the selected f64 leaves through 2 KiB of shared
+memory. The first warp adds each row's leaves in tree order before the next tile reuses that memory. Raw f32/f64
+inputs and f64 thresholds are preserved, without allocating a batch-by-forest intermediate. Binary sigmoid
+conversion uses the same host transform as CPU scoring.
+
+`CudaPredictorF32` explicitly selects approximate float32 thresholds, leaves, accumulation and output, returning
+`Vec<f32>` or writing into `&mut [f32]`. It uses 1 KiB shared leaf tiles. Numeric thresholds round down to preserve
+comparisons for representable float32 values; float64 input values are converted on the GPU and can change paths.
+Categorical bitset metadata retains its integer indices. The default `CudaPredictor` remains exact float64.
+
+Linux Python builds expose `silvic.serve.Predictor(model, device="cuda", device_id=0, precision="float64")` and
+the same options on `silvic.serve.Model`. Opt into `precision="float32"` for numpy float32 predictions; `.precision`
+reports the selection. CPU scoring supports only `precision="float64"`. `available_devices()` reports runtime support;
+`available_kernels()` remains CPU-only. CUDA rejects CPU kernel selection and nondefault CPU thread controls,
+propagates device errors without falling back, and serializes calls sharing one Python predictor on its stream.
+
+The Triton backend still accepts CPU instances only.
+
 ## Tests
 
 `cargo test -p silvic-serve` compares every kernel the CPU runs, bit for bit:
 
-- `tests/lightgbm_fixtures.rs`: against the predictions LightGBM 3.3.5 and 4.7 recorded for the models and edge rows
-  in `silvic-core/tests/fixtures/lightgbm`, all trees and a prefix.
+- `tests/lightgbm_fixtures.rs`: against the raw predictions LightGBM 3.3.5 and 4.7 recorded for the models and edge
+  rows in `silvic-core/tests/fixtures/lightgbm`, all trees and a prefix; transformed outputs match the host's core
+  predictor. `tests/python/test_serve.py` also compares binary fixture probabilities bitwise with current-host
+  LightGBM: the host math library's `exp` can differ in its last bit across platforms.
 - `tests/random_forests.rs`: against `Model::predict_raw_row` on random forests (every missing type and default
   direction, multi-word category bitsets, 64 classes, more than 64 classes, single-leaf trees, 65 to 300 leaves, NaN
   thresholds, 700 thresholds per feature) and rows at every threshold, its neighbouring doubles, NaN, ±0,
@@ -71,6 +95,10 @@ From Python, `silvic.serve.Predictor(booster_or_text_or_path).predict(X, num_thr
 `SILVIC_SERVE_EXPECT_KERNELS` (e.g. `portable,neon`) fails the run unless exactly those kernels ran. The AVX2 kernel
 runs on Apple silicon under Rosetta 2, which reports AVX2 only when asked:
 `ROSETTA_ADVERTISE_AVX=1 SILVIC_SERVE_EXPECT_KERNELS=portable,avx2 cargo test -p silvic-serve --target x86_64-apple-darwin`.
+
+`cargo test -p silvic-serve --features cuda` adds exact CUDA parity for recorded LightGBM fixtures, decision
+boundaries, categories and missing values, large trees, layouts, prefixes, empty batches and changing batch sizes.
+CUDA execution tests skip when the driver, NVRTC or a device is unavailable.
 
 `cargo bench -p silvic-serve --bench predict` times 3000 rows of a random 2000-tree, 53-leaf forest through the
 reference walk and every kernel; `bench/serve.py` compares against LightGBM, lleaves and treelite on a trained model.

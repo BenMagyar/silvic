@@ -11,7 +11,8 @@
   <link rel="alternate" type="application/rss+xml" title="silvic changelog" href="../feed.xml">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600&amp;family=JetBrains+Mono&amp;display=swap">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Faustina:wght@400;500;600&amp;family=JetBrains+Mono:wght@400&amp;display=swap" media="print" onload="this.media='all'">
+  <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Faustina:wght@400;500;600&amp;family=JetBrains+Mono:wght@400&amp;display=swap"></noscript>
   <link rel="stylesheet" href="../styles.css">
   <link rel="stylesheet" href="../docs.css">
 </head>
@@ -20,55 +21,67 @@
     <header class="masthead deeper">
       <a class="rooted" href="../"><canvas class="growth" width="32" height="32" aria-hidden="true"></canvas>silvic</a>
       <nav class="trail" aria-label="silvic">
-        <a class="homeward" href="../">Overview</a>
+        <a href="../how.html">How</a>
         <a href="./" aria-current="true">Docs</a>
         <a href="../changelog.html">Changelog</a>
       </nav>
     </header>
 
     <h1><code>silvic-serve</code></h1>
-    <p>Scores LightGBM models, <code>model.txt</code> from LightGBM 3.3.5 or 4.x or from silvic, with LightGBM’s predictions bit for bit. A 3,000-row batch through 2,000 trees of 53 leaves takes 12.2 ms on one Apple M4 Pro core, against 64.0 ms for lleaves 1.1.0 and 581.6 ms for LightGBM. Python reaches it as <code>silvic.serve</code>, in the <code>silvic</code> package.</p>
+    <p><code>silvic-serve</code> scores LightGBM 3.x and 4.x models from LightGBM or silvic. Its default float64 mode matches LightGBM’s predictions bit for bit, and its CUDA float32 mode uses approximate float32 arithmetic and output. Python exposes these predictors as <code>silvic.serve</code>. The <a href="../#scoring">serving benchmarks</a> compare CPU and CUDA runtimes; the CPU predictor uses <a href="../how.html#serving">leaf bitvectors</a> to evaluate rows.</p>
     <pre tabindex="0"><code><span class="word">import</span> silvic.serve
 
 predictor = silvic.serve.Predictor(<span class="said">"model.txt"</span>)
 scores = predictor.predict(candidates, num_threads=<span class="said">1</span>)
 
+cuda = silvic.serve.Predictor(<span class="said">"model.txt"</span>, device=<span class="said">"cuda"</span>)
+scores = cuda.predict(candidates)
+
+fast = silvic.serve.Predictor(<span class="said">"model.txt"</span>, device=<span class="said">"cuda"</span>, precision=<span class="said">"float32"</span>)
+scores = fast.predict(candidates)
+
 model = silvic.serve.Model(model_file=<span class="said">"model.txt"</span>)  # where lleaves.Model was
 model.compile()
 scores = model.predict(candidates, n_jobs=<span class="said">1</span>)</code></pre>
+    <p>On the benchmark’s 24,000 held-out rows, CUDA float32 had a maximum absolute error of <code>6.06e-6</code> against LightGBM float64. NDCG@10 and top-10 order were unchanged across 480 queries. The default float64 output was bitwise exact.</p>
 
     <h2>Public API</h2>
     <dl class="manifest">
-      <dt><code>silvic.serve.Predictor(model, kernel=None)</code></dt>
-      <dd>Compiles a <code>silvic.Booster</code>, a <code>lightgbm.Booster</code>, model text or a model file, in milliseconds.</dd>
+      <dt><code>silvic.serve.Predictor(model, kernel=None, *, device="cpu", device_id=0, precision="float64")</code></dt>
+      <dd>Prepares a <code>silvic.Booster</code>, a <code>lightgbm.Booster</code>, model text or a file. CPU is the default; <code>device="cuda"</code> selects a GPU ordinal on Linux. <code>precision="float32"</code> uses approximate float32 thresholds, leaves, accumulation and output. <code>device="neuron"</code> selects a logical core through the <a href="silvic-neuron.html"><code>silvic-neuron</code></a> backend and requires explicit float32. Both devices reject CPU kernel selection. Device errors propagate.</dd>
       <dt><code>predictor.predict(data, raw_score=False, num_iteration=None, num_threads=1)</code></dt>
-      <dd>One score per row of numpy (f32 or f64, C or Fortran order) or pandas, with categories mapped as at training. One thread scores on the calling thread, 0 on every core. Releases the GIL.</dd>
-      <dt><code>silvic.serve.Model(model_file=None, model_str=None)</code></dt>
-      <dd>lleaves’ <code>Model</code>: <code>compile()</code> records <code>raw_score</code> and ignores lleaves’ tuning options, and <code>predict(data, n_jobs=None)</code> uses every core unless told otherwise, as lleaves does.</dd>
+      <dd>One score per row of numpy (f32 or f64, C or Fortran order) or pandas, with categories mapped as at training. Output dtype follows serving precision, not input dtype. Float32 mode converts f64 inputs to float32. CPU scoring uses one thread, or every core with 0; CUDA and Neuron require <code>num_threads=1</code>. Releases the GIL; shared device predictors serialize calls.</dd>
+      <dt><code>silvic.serve.Model(model_file=None, model_str=None, kernel=None, *, device="cpu", device_id=0, precision="float64")</code></dt>
+      <dd>A lleaves-style wrapper. Choose precision at construction; <code>compile()</code> records <code>raw_score</code> and ignores lleaves’ tuning options. <code>predict(data, n_jobs=None)</code> uses every CPU core, or default CUDA/Neuron execution. Explicit nondefault thread counts are CPU-only.</dd>
       <dt><code>Predictor::new(&amp;model)</code>, <code>predictor.predict(&amp;rows, raw_score, num_trees, num_threads)</code></dt>
       <dd>The same from Rust, on a <code>silvic_core::Model</code> and a <code>DenseMatrix</code>; <code>predict_raw</code> writes raw scores into a caller’s buffer.</dd>
       <dt><code>Kernel</code>, <code>Predictor::with_kernel(&amp;model, kernel)</code>, <code>available_kernels()</code></dt>
       <dd><code>neon</code>, <code>avx2</code>, <code>avx512</code> or <code>portable</code>. <code>Kernel::detect</code> picks NEON on aarch64 and AVX2 on x86-64 that has it, else the portable kernel.</dd>
+      <dt><code>silvic.serve.available_devices()</code></dt>
+      <dd>Lists <code>cpu</code> and available Linux <code>cuda</code> or <code>neuron</code> runtimes/devices. <code>available_kernels()</code> remains CPU-only. Neuron’s compiler and installation requirements are documented in <a href="silvic-neuron.html"><code>silvic-neuron</code></a>.</dd>
+      <dt><code>CudaPredictor::new(&amp;model, ordinal)</code>, <code>CudaPredictorF32::new(&amp;model, ordinal)</code></dt>
+      <dd>Rust’s opt-in <code>cuda</code> feature. The first returns f64 scores; the second returns approximate f32 scores. Both keep the forest and reusable buffers on device. <code>predict</code> returns a result; <code>predict_raw</code> writes into a caller’s typed buffer. Device errors propagate without fallback.</dd>
     </dl>
-    <p class="also"><b>Also public</b> <code>predictor.kernel</code>, <code>predictor.num_trees()</code>, <code>predictor.num_feature()</code>, <code>Predictor::num_walked_trees</code>.</p>
+    <p class="also"><b>Also public</b> <code>predictor.precision</code>, <code>model.precision</code>, <code>predictor.device</code>, <code>predictor.kernel</code>, <code>predictor.num_trees()</code>, <code>predictor.num_feature()</code>, <code>Predictor::num_walked_trees</code>.</p>
 
     <h2>How it scores</h2>
-    <p>Each tree is QuickScorer’s leaf bitvector (Lucchese et al., SIGIR 2015): leaves are numbered left to right, each node clears its left subtree’s bits in the rows that go right, and the lowest bit left is the exit leaf, so no branch depends on the data. Rows are scored 64 at a time, one SIMD byte lane per row, with each tree’s bitvectors sliced into bytes across the lanes, as in RapidScorer (Ye et al., KDD 2018). Before that, each value becomes a byte: its rank among the split thresholds of its feature, found by a branchless binary search over all lanes at once, so every split is a byte compare. Leaf values are added per row in tree order, in f64, as LightGBM adds them.</p>
-    <p>NaN and zero take the codes left or right of every threshold that LightGBM’s missing-value handling and <code>default_left</code> send them to, and values within <code>kZeroThreshold</code> of zero read as zero, as in LightGBM’s dense reader. Categories that every split treats alike share a class, and a categorical split is a 64-byte table; NaN, negative and unseen categories go right.</p>
-    <p>Trees of more than 256 leaves, a NaN threshold, or a categorical feature with more than 64 distinct category behaviours are walked node by node with <code>silvic-core</code>’s decisions instead: every model <code>silvic-core</code> reads scores, those trees at LightGBM’s speed.</p>
+    <p>CPU kernels reuse byte-sized threshold ranks and filter leaf bitvectors across SIMD rows. Large trees, NaN thresholds and categorical features with more than 64 distinct category behaviours use exact node walks. <a href="../how.html#serving">The CPU serving comparison</a> shows the bitvector path.</p>
+    <p>CUDA walks 32-row tiles across up to eight trees concurrently. Shared leaf tiles use 2 KiB in float64 or 1 KiB in float32; the first warp adds leaves in tree order. Float32 numerical thresholds round down to preserve decisions for representable f32 values; f64 input conversion can change paths. The objective transform uses the selected precision on the host. <a href="silvic-triton.html">Triton instances</a> remain CPU-only.</p>
 
     <h2>Kernels</h2>
     <dl class="manifest">
       <dt><code>neon</code> <span class="default">aarch64</span></dt>
-      <dd>64 rows per block. Timed above.</dd>
+      <dd>64 rows per block.</dd>
       <dt><code>avx2</code> <span class="default">x86-64</span></dt>
-      <dd>64 rows per block. Its tests pass under Rosetta 2; its speed on x86 is not yet measured.</dd>
+      <dd>64 rows per block; the x86-64 default when supported.</dd>
       <dt><code>avx512</code></dt>
-      <dd>Compiles but has not run on AVX-512 hardware, so it is used only when asked for by name.</dd>
+      <dd>64 rows per block. Opt-in by name, not selected automatically.</dd>
       <dt><code>portable</code></dt>
-      <dd>Plain Rust, eight byte lanes to a u64 word, 32 rows per block: 37.5 ms for the batch above.</dd>
+      <dd>Plain Rust, eight byte lanes to a u64 word, 32 rows per block.</dd>
+      <dt><code>cuda</code> <span class="default">opt-in device</span></dt>
+      <dd>Cooperative tree walking in float64 or explicit float32, selected with <code>device="cuda"</code> rather than the CPU <code>Kernel</code> enum.</dd>
     </dl>
-    <p>Every kernel gives the same predictions, tested bit for bit against LightGBM 3.3.5 and 4.7’s own predictions and against <code>silvic-core</code> on random forests, at every threshold and its neighbouring doubles, NaN, ±0, ±<code>kZeroThreshold</code> and ±inf.</p>
+    <p>Float64 kernels are checked bitwise against LightGBM and <code>silvic-core</code> across layouts, missing values, categorical decisions, threshold boundaries and tree prefixes. Float32 is checked against its own arithmetic contract, not exact float64 equivalence. Binary probabilities use the host math library, whose <code>exp</code> can differ in its last bit across platforms.</p>
 
     <nav class="onward" aria-label="Crates">
       <a href="silvic-net.html">← <code>silvic-net</code></a>

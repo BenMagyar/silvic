@@ -24,6 +24,9 @@
 - CUDA: building needs no CUDA toolkit (cudarc loads the driver and NVRTC at run time). Running needs an NVIDIA
   driver and `libnvrtc` from CUDA 12. The CUDA syntax test needs a clang that accepts `-x cuda` (`SILVIC_CUDA_CLANG`,
   Homebrew's LLVM, or `clang++` on `PATH`).
+- AWS Neuron: [`silvic-neuron`](crates/silvic-neuron) builds without the SDK. Execution needs a Neuron accelerator
+  host, the Neuron driver/runtime and a separate Python 3.11 environment with the pinned `neuronx-cc` compiler.
+  See the crate README for setup.
 - [blaze](https://github.com/indexable-inc/blaze) can shorten debug edit-test loops (`blaze test -p silvic-core`), but
   cargo and maturin stay the build: blaze hands `--release` builds to cargo and refuses `lto`, and benchmarks, wheels
   and CI are release builds.
@@ -53,6 +56,7 @@ Tests:
 | `silvic-triton` | `tests/triton/run.sh` | Docker (about 2 GB of images, and the `silvic-triton-target` and `silvic-triton-cargo` volumes) and `.venv`: builds the backend for Linux and runs `tests/triton/test_backend.py` against tritonserver 2.51.0 |
 | `silvic-gpu` | `cargo test -p silvic-gpu --features metal` | a Metal device, skipped without one; clang with CUDA support for `tests/cuda_syntax.rs` |
 | `silvic-gpu` | `cargo test -p silvic-gpu --features cuda` | nothing beyond the syntax test runs CUDA yet |
+| `silvic-neuron` | `cargo test -p silvic-neuron` | host numeric/validation checks; hardware regressions run only with `SILVIC_TEST_NEURON=1` on a configured Neuron host |
 | Python | `.venv/bin/maturin develop --release && .venv/bin/pytest tests/python` | `.venv`; the Ray tests start a local Ray cluster |
 
 Timing tests are ignored by default and print per-operation times in release builds:

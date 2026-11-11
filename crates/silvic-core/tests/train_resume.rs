@@ -1,12 +1,15 @@
 //! Continued training (`train_from`): a run checkpointed after some trees and resumed from the checkpoint's model
 //! text gives the model string of the uninterrupted run, byte for byte, and the same evaluations on the way.
 
+#[path = "../src/test_util.rs"]
+mod test_util;
+
 use silvic_core::collective::Collective;
 use silvic_core::data::{DatasetInput, DenseData, DenseMatrix, Layout};
 use silvic_core::metric::EvalResult;
 use silvic_core::quantize;
-use silvic_core::test_util::run_ranks;
-use silvic_core::{train, train_from, BinnedDataset, CpuBackend, LocalCollective, Model, Params};
+use silvic_core::{train, train_from, BinnedDataset, CpuBackend, LocalCollective, Model, Params, Result};
+use test_util::run_ranks;
 
 const TOTAL: usize = 30;
 const CHECKPOINT: usize = 12;

@@ -1,11 +1,14 @@
 //! Compares `metric::evaluate` against metric values recorded from LightGBM 4.7.0 (`fixtures/metrics/generate.py`).
 
+#[path = "../src/test_util.rs"]
+mod test_util;
+
 use serde_json::Value;
 
 use silvic_core::config::{Metric, Objective};
 use silvic_core::metric::evaluate;
-use silvic_core::test_util::run_ranks;
-use silvic_core::{BinnedDataset, LocalCollective, Params};
+use silvic_core::{BinnedDataset, Collective, LocalCollective, Params, Result};
+use test_util::run_ranks;
 
 const CASES: &str = include_str!("fixtures/metrics/cases.json");
 

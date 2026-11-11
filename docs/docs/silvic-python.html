@@ -11,7 +11,8 @@
   <link rel="alternate" type="application/rss+xml" title="silvic changelog" href="../feed.xml">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600&amp;family=JetBrains+Mono&amp;display=swap">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Faustina:wght@400;500;600&amp;family=JetBrains+Mono:wght@400&amp;display=swap" media="print" onload="this.media='all'">
+  <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Faustina:wght@400;500;600&amp;family=JetBrains+Mono:wght@400&amp;display=swap"></noscript>
   <link rel="stylesheet" href="../styles.css">
   <link rel="stylesheet" href="../docs.css">
 </head>
@@ -20,14 +21,15 @@
     <header class="masthead deeper">
       <a class="rooted" href="../"><canvas class="growth" width="32" height="32" aria-hidden="true"></canvas>silvic</a>
       <nav class="trail" aria-label="silvic">
-        <a class="homeward" href="../">Overview</a>
+        <a href="../how.html">How</a>
         <a href="./" aria-current="true">Docs</a>
         <a href="../changelog.html">Changelog</a>
       </nav>
     </header>
 
     <h1><code>silvic-python</code></h1>
-    <p>The <code>silvic</code> Python package: LightGBM’s Python API over <a href="silvic-core.html"><code>silvic-core</code></a> and the Metal and CUDA backends of <a href="silvic-gpu.html"><code>silvic-gpu</code></a>, and <code>silvic.ray</code>, which trains one model across Ray actors over the TCP ring of <a href="silvic-net.html"><code>silvic-net</code></a>. A CPython 3.10+ extension (abi3). Training runs without the GIL. Ray, pandas and scikit-learn are optional: <code>silvic[ray]</code>, <code>silvic[pandas]</code>, <code>silvic[sklearn]</code>.</p>
+    <p><code>silvic-python</code> builds the <code>silvic</code> package, which exposes LightGBM’s Python API over <a href="silvic-core.html"><code>silvic-core</code></a>. Metal and CUDA training use <a href="silvic-gpu.html"><code>silvic-gpu</code></a>, while AWS Neuron training uses <a href="silvic-neuron.html"><code>silvic-neuron</code></a>. The <code>silvic.ray</code> module trains one model across Ray actors over the TCP ring of <a href="silvic-net.html"><code>silvic-net</code></a>.</p>
+    <p>The extension supports CPython 3.10 or newer through abi3 and runs training without the GIL. Ray, pandas and scikit-learn dependencies are available through the <code>silvic[ray]</code>, <code>silvic[pandas]</code> and <code>silvic[sklearn]</code> extras.</p>
     <pre tabindex="0"><code><span class="word">pip install</span> silvic</code></pre>
 
     <h2>Public API</h2>
@@ -49,7 +51,7 @@
       <dt><code>SilvicRanker</code>, <code>SilvicRegressor</code>, <code>SilvicClassifier</code></dt>
       <dd><code>LGBMRanker</code>, <code>LGBMRegressor</code> and <code>LGBMClassifier</code> (two classes): the same constructor parameters, <code>fit</code> with <code>group</code>, <code>sample_weight</code>, <code>eval_set</code> and <code>eval_group</code>, and <code>booster_</code>, <code>feature_importances_</code>, <code>evals_result_</code>. scikit-learn is optional.</dd>
       <dt><code>available_devices()</code></dt>
-      <dd>The devices this process can train on: <code>cpu</code>, and <code>metal</code> or <code>cuda</code>.</dd>
+      <dd>The runtime devices visible to this process: <code>cpu</code>, and available <code>metal</code>, <code>cuda</code> or <code>neuron</code> accelerators.</dd>
     </dl>
     <p class="also"><b>Also public</b> <code>booster.num_trees()</code>, <code>booster.feature_name()</code>, <code>booster.feature_importance(importance_type)</code>, <code>CallbackEnv</code>, <code>SilvicModel</code>, and the exceptions below.</p>
 
@@ -62,25 +64,31 @@
       <dd>CUDA, then Metal; an error without either.</dd>
       <dt><code>cpu</code>, <code>metal</code>, <code>cuda</code></dt>
       <dd>That backend, or an error when it is absent.</dd>
+      <dt><code>neuron</code> <span class="default">Linux, explicit selection</span></dt>
+      <dd>AWS Neuron through <a href="silvic-neuron.html"><code>silvic-neuron</code></a>; <code>gpu_device_id</code> selects a logical NeuronCore. Requires the separate compiler and runtime.</dd>
     </dl>
 
     <h2>Errors</h2>
     <p><code>SilvicError</code> is the base class. <code>ConfigError</code> and <code>DataError</code> are also <code>ValueError</code>s, as LightGBM raises for bad input; <code>DeviceError</code>, <code>CollectiveError</code>, <code>ModelError</code> and <code>UnsupportedError</code> are also <code>RuntimeError</code>s. An unknown parameter is a <code>ValueError</code>, as are <code>fobj</code>, <code>feval</code>, <code>learning_rates</code> and early stopping, which silvic does not do. An exception raised in a callback stops training and is raised from <code>train</code>; Ctrl-C raises <code>KeyboardInterrupt</code>.</p>
 
-    <h2><code>silvic.ray</code></h2>
+    <h2 id="ray"><code>silvic.ray</code></h2>
     <pre tabindex="0"><code><span class="word">import</span> ray
 <span class="word">import</span> silvic.ray
 
 booster = silvic.ray.train(
-    params, ray.data.read_parquet(<span class="said">"s3://bucket/train/"</span>),
-    label_column=<span class="said">"label"</span>, group_column=<span class="said">"query_id"</span>,
-    num_workers=<span class="said">5</span>, use_gpu=<span class="word">True</span>, num_boost_round=<span class="said">1500</span>,
+    params,
+    ray.data.read_parquet(<span class="said">"s3://bucket/train/"</span>),
+    label_column=<span class="said">"label"</span>,
+    group_column=<span class="said">"query_id"</span>,
+    num_workers=<span class="said">5</span>,
+    use_gpu=<span class="word">True</span>,
+    num_boost_round=<span class="said">1500</span>,
 )</code></pre>
     <dl class="manifest">
       <dt><code>silvic.ray.train(params, train_dataset, *, label_column, group_column=None, num_workers=1, use_gpu=False, ...)</code></dt>
       <dd>Trains one model across <code>num_workers</code> actors and returns rank 0’s <code>Booster</code>. Also takes <code>weight_column</code>, <code>feature_columns</code> (every other column by default), <code>categorical_features</code> (integer-coded columns), <code>valid_datasets</code> (a dict of name to dataset), <code>num_boost_round</code>, <code>evals_result</code> and <code>verbose_eval</code>.</dd>
       <dt><code>resources_per_worker</code> <span class="default">{"CPU": 1}</span></dt>
-      <dd>One placement-group bundle per actor. An explicit <code>CPU</code> count also sets <code>num_threads</code>. <code>use_gpu</code> adds one Ray GPU, which CUDA uses; Metal needs none.</dd>
+      <dd>One placement-group bundle per actor. An explicit <code>CPU</code> count also sets <code>num_threads</code>. <code>use_gpu</code> adds one Ray GPU, which CUDA uses; Metal needs none. Explicit <code>device_type="neuron"</code> instead adds one <code>neuron_cores</code> resource by default; a positive whole-number reservation overrides it. Ray sets <code>NEURON_RT_VISIBLE_CORES</code>. Neuron rejects <code>use_gpu</code> and GPU resources.</dd>
       <dt><code>placement_strategy</code> <span class="default">"PACK"</span></dt>
       <dd>The placement group’s strategy.</dd>
       <dt><code>timeout_s</code> <span class="default">1800</span></dt>

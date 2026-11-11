@@ -11,7 +11,8 @@
   <link rel="alternate" type="application/rss+xml" title="silvic changelog" href="../feed.xml">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600&amp;family=JetBrains+Mono&amp;display=swap">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Faustina:wght@400;500;600&amp;family=JetBrains+Mono:wght@400&amp;display=swap" media="print" onload="this.media='all'">
+  <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Faustina:wght@400;500;600&amp;family=JetBrains+Mono:wght@400&amp;display=swap"></noscript>
   <link rel="stylesheet" href="../styles.css">
   <link rel="stylesheet" href="../docs.css">
 </head>
@@ -20,7 +21,7 @@
     <header class="masthead deeper">
       <a class="rooted" href="../"><canvas class="growth" width="32" height="32" aria-hidden="true"></canvas>silvic</a>
       <nav class="trail" aria-label="silvic">
-        <a class="homeward" href="../">Overview</a>
+        <a href="../how.html">How</a>
         <a href="./" aria-current="true">Docs</a>
         <a href="../changelog.html">Changelog</a>
       </nav>
@@ -72,7 +73,7 @@ models/ranker/1/model.txt</code></pre>
       <dt>FIL on the CPU, OpenMP on every vCPU</dt>
       <dd>243 ms at the median; its outputs, computed in f32, differ from LightGBM’s by up to 2.4e-5.</dd>
     </dl>
-    <p>FIL is built for NVIDIA GPUs; its GPU mode, and this backend on x86, have not been measured yet.</p>
+    <p>FIL is built for NVIDIA GPUs; its GPU mode, and this backend on x86, have not been measured.</p>
 
     <nav class="onward" aria-label="Crates">
       <a href="silvic-serve.html">← <code>silvic-serve</code></a>

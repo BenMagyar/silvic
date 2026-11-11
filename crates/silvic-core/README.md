@@ -1,8 +1,9 @@
 # silvic-core
 
 LightGBM-compatible gradient boosting: binning, objectives, leaf-wise tree growth on quantized integer histograms,
-and LightGBM 3.3.5 model text. Training runs through a `Backend` (this crate's `CpuBackend`, or the Metal and CUDA
-backends of [`silvic-gpu`](../silvic-gpu)) and reduces histograms across ranks through a `Collective`
+and LightGBM 3.3.5 model text. Training runs through a `Backend`: this crate's `CpuBackend`, the Metal and CUDA
+backends of [`silvic-gpu`](../silvic-gpu), or the AWS Neuron backend of
+[`silvic-neuron`](../silvic-neuron). Histograms reduce across ranks through a `Collective`
 (`LocalCollective` in one process, [`silvic-net`](../silvic-net)'s TCP ring across many).
 
 | Module | LightGBM 3.3.5 counterpart |

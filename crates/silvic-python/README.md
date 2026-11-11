@@ -23,6 +23,16 @@ booster = silvic.train({"objective": "lambdarank", "num_leaves": 31}, train_set,
 scores = booster.predict(X_test)
 ```
 
+## AWS Neuron
+
+Explicit `device_type="neuron"` uses [`silvic-neuron`](../silvic-neuron) for training on Linux; `auto` and `gpu`
+retain their existing behavior. Serving requires `silvic.serve.Predictor(model, device="neuron", precision="float32")`;
+CPU/CUDA float64 defaults are unchanged. The Neuron compiler and runtime are installed separately as documented
+in that crate.
+
+For `silvic.ray.train`, `device_type="neuron"` reserves one `neuron_cores` resource per worker by default.
+Use `resources_per_worker` to override the reservation; do not combine Neuron with `use_gpu=True` or GPU resources.
+
 ## Tests
 
 `tests/python` compares predictions against LightGBM 4.x loading the same model text, and distributed Ray training

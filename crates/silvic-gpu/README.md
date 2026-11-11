@@ -24,7 +24,8 @@ let mut backend = silvic_gpu::metal::backend(None)?;
 let model = silvic_core::train(&params, &train_set, &[], &mut backend, &mut LocalCollective, &mut |_| Ok(()))?;
 ```
 
-The CUDA backend compiles and its kernel source passes clang's CUDA front end, but it has not run on an NVIDIA GPU.
+CUDA training has been benchmarked on a Tesla T4; see the documentation's training comparison for the synthetic
+workload and timings. The guarded driver/NVRTC loader reports missing or mismatched drivers as device errors.
 
 ## Tests
 

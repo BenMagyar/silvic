@@ -28,7 +28,9 @@
   const STAYING = { turn: [1, 0, 0, 0, 1, 0, 0, 0, 1], scale: 1, shift: [0, 0, 0] };
 
   for (const canvas of trees) {
-    const glass = canvas.getContext("webgl", clearly());
+    const geometry = { original: 0, faceted: 1, measured: 2, chiseled: 3 }[canvas.dataset.geometry] ?? 3;
+    const still = canvas.hasAttribute("data-still");
+    const glass = canvas.getContext("webgl", { ...clearly(), preserveDrawingBuffer: still });
     const everywhere = glass && heard(glass, glass.VERTEX_SHADER, where_everything_is());
     const a_moment = glass && heard(glass, glass.FRAGMENT_SHADER, what_a_moment_looks_like());
     const grove = everywhere && a_moment && held_together(glass, everywhere, a_moment);
@@ -41,12 +43,13 @@
     canvas.width = canvas.height = room;
     glass.viewport(0, 0, room, room);
     glass.uniform2f(at("room"), room, room);
-    tinted(glass, at);
+    glass.uniform1f(at("geometry"), geometry);
+    tinted(glass, at, canvas);
 
     // The tree in view, in its own coordinates, which are the world's; the branches of the tree it grew from that
     // lead to it; the tree growing from its topmost leaf while the view dives.
     let generation = 0;
-    let here = { tree: sown(0), beats: 0 };
+    let here = { tree: sown(0, geometry === 2), beats: 0 };
     let behind = null;
     let ahead = null;
     let swaying = 0;
@@ -68,7 +71,7 @@
       pace += (wish - pace) * Math.min(1, a_little * 6);
       here.beats += (a_little * pace) / A_BEAT;
       swaying += a_little * pace;
-      if (!ahead && here.beats >= DIVE_AT) ahead = planned(here.tree, generation + 1);
+      if (!ahead && here.beats >= DIVE_AT) ahead = planned(here.tree, generation + 1, geometry === 2);
       if (ahead && here.beats >= DIVE_AT + DIVING) {
         behind = { tree: here.tree, place: undone(ahead.place), leading: ahead.leading, narrowed: ahead.narrowed };
         here = { tree: ahead.tree, beats: here.beats - DIVE_AT };
@@ -81,8 +84,8 @@
 
     const go = () => {
       forget(waiting);
-      if (stillness.matches) {
-        here = { tree: sown(0), beats: DIVE_AT - STANDING / 2 };
+      if (still || stillness.matches) {
+        here = { tree: sown(0, geometry === 2), beats: DIVE_AT - STANDING / 2 };
         behind = ahead = null;
         be();
         return;
@@ -102,7 +105,7 @@
 
   // One tree, every branch with the beat it sprouts on. Leaf-wise, like silvic: each beat the leaf with the largest
   // gain splits in two, so long, open limbs branch first and the crown fills in after.
-  function sown(generation) {
+  function sown(generation, measured = false) {
     const chance = seeded(0x51b1c + generation * 7919);
     const trunk = {
       from: GROUND,
@@ -120,15 +123,18 @@
       const best = leaves_of(branches).reduce((a, b) => (b.gain > a.gain ? b : a));
       const tip = along(best.from, best.toward, best.length);
       for (const side of [1, -1]) {
-        const length = best.length * (best.depth === 0 ? 0.95 : 0.74) * (0.92 + 0.16 * chance());
+        const length = best.length * (best.depth === 0 ? 0.95 : 0.74) * (measured ? 1 : 0.92 + 0.16 * chance());
         const child = {
           from: tip,
-          toward: bent(best.toward, 0.55 + 0.3 * chance(), side, (chance() - 0.5) * 0.7),
+          toward: measured
+            ? bent(best.toward, Math.PI / 4, side, 0)
+            : bent(best.toward, 0.55 + 0.3 * chance(), side, (chance() - 0.5) * 0.7),
           length,
           girth: Math.max(0.07, best.girth * 0.8),
           depth: best.depth + 1,
           born: beat,
           gain: length * (0.5 + 0.5 * chance()) * (1 - 0.12 * (best.depth + 1)),
+          bud_size: measured ? 0.075 : 0.12,
           parent: best,
           children: [],
         };
@@ -147,7 +153,7 @@
   // the leaf's tip, a fifth the size, along the leaf. The dive is the one similarity that maps the next tree's
   // coordinates onto this one's, run a fraction at a time about its fixed point, so the view spirals in on the leaf
   // rather than sliding to it.
-  function planned(tree, generation) {
+  function planned(tree, generation, measured = false) {
     const leaves = leaves_of(tree);
     const tip_of = (b) => along(b.from, b.toward, b.length);
     const leaf = leaves.reduce((a, b) => (tip_of(b)[1] > tip_of(a)[1] ? b : a));
@@ -164,7 +170,7 @@
     const still_point = solved(minus_matrix(STAYING.turn, scaled_matrix(turn, scale)), shift);
     // The leaf narrows until, seen from the next tree, it is the stem: as thick as the roots the first tree has.
     const narrowed = STEM_GIRTH / (leaf.girth * NEARER);
-    return { tree: sown(generation), leaf, leading, narrowed, place: { turn, scale, shift }, about, angle, still_point };
+    return { tree: sown(generation, measured), leaf, leading, narrowed, place: { turn, scale, shift }, about, angle, still_point };
   }
 
   function dived(ahead, diving) {
@@ -210,7 +216,7 @@
         from: placed(place, branch.from),
         to: placed(place, tip),
         girth: branch.girth * scales[0] * place.scale,
-        bud: 0.12 * grown * (1 - outgrown) * scales[1] * place.scale,
+        bud: (branch.bud_size ?? 0.12) * grown * (1 - outgrown) * scales[1] * place.scale,
       });
     }
     return limbs;
@@ -233,8 +239,8 @@
     glass.uniform1f(at("turning"), 0.45 * Math.sin(swaying * 0.7));
   }
 
-  function tinted(glass, at) {
-    const style = getComputedStyle(document.documentElement);
+  function tinted(glass, at, canvas) {
+    const style = getComputedStyle(canvas);
     for (const [uniform, token] of [["dusk", "--green-below"], ["day", "--green"], ["dawn", "--green-above"]]) {
       glass.uniform3fv(at(uniform), as_light(style.getPropertyValue(token)));
     }
@@ -418,6 +424,7 @@
       precision highp float;
       uniform vec2 room;
       uniform float turning;
+      uniform float geometry;
       uniform float count;
       uniform vec4 branch_from[${AT_MOST}];
       uniform vec4 branch_to[${AT_MOST}];
@@ -438,10 +445,32 @@
         return mat2(c, s, -s, c);
       }
 
+      float faceted(vec3 p) {
+        p = abs(p);
+        float faces = max(p.x, max(p.y, p.z));
+        float edges = max(p.x + p.y, max(p.y + p.z, p.z + p.x)) * 0.70710678;
+        return max(max(faces, edges), (p.x + p.y + p.z) * 0.57735027);
+      }
+
+      float beveled(vec3 p, vec3 half_size, float bevel) {
+        vec3 q = abs(p) - half_size + bevel;
+        return length(max(q, 0.0)) + min(max(q.x, max(q.y, q.z)), 0.0) - bevel;
+      }
+
       float limb(vec3 p, vec3 from, vec3 to, float girth) {
         vec3 along = p - from, all = to - from;
         float h = clamp(dot(along, all) / max(dot(all, all), 1e-9), 0.0, 1.0);
-        return length(along - all * h) - girth * mix(1.0, 0.85, h);
+        float radius = girth * mix(1.0, 0.85, h);
+        vec3 offset = along - all * h;
+        if (geometry < 0.5) return length(offset) - radius;
+        if (geometry < 2.5) return faceted(offset) - radius;
+        float extent = length(all);
+        vec3 axis = extent > 1e-6 ? all / extent : vec3(0.0, 1.0, 0.0);
+        vec3 reference = abs(axis.z) < 0.99 ? vec3(0.0, 0.0, 1.0) : vec3(0.0, 1.0, 0.0);
+        vec3 side = normalize(cross(axis, reference));
+        vec3 depth = cross(side, axis);
+        vec3 local = vec3(dot(along, side), dot(along, axis) - extent * 0.5, dot(along, depth));
+        return beveled(local, vec3(radius, extent * 0.5 + radius * 0.8, radius), radius * 0.28);
       }
 
       // Joints blend in proportion to the branches, so a tree a fifth the size is the same tree.
@@ -452,8 +481,14 @@
           vec4 from = branch_from[i];
           vec4 to = branch_to[i];
           float d = limb(p, from.xyz, to.xyz, from.w);
-          if (to.w > 0.0) d = together(d, length(p - to.xyz) - to.w, to.w * 0.25);
-          here = together(here, d, from.w * 0.3);
+          if (to.w > 0.0) {
+            vec3 tip = p - to.xyz;
+            float bud = geometry < 0.5 ? length(tip) - to.w
+              : geometry < 2.5 ? faceted(tip) - to.w
+              : beveled(tip, vec3(to.w * 0.9), to.w * 0.2);
+            d = together(d, bud, to.w * 0.25);
+          }
+          here = together(here, d, from.w * (geometry < 0.5 ? 0.3 : 0.18));
         }
         return here;
       }
@@ -466,7 +501,7 @@
         float above = resting - p.y;
         p.xz *= turn(turning);
         float d = wood(view * p + view_shift) / view_scale;
-        return -together(-d, -above, 0.1);
+        return -together(-d, -above, geometry < 0.5 ? 0.1 : 0.035);
       }
 
       vec3 facing(vec3 p) {
@@ -479,7 +514,7 @@
 
       void main() {
         vec2 seen = (2.0 * gl_FragCoord.xy - room) / room.y;
-        vec3 eye = vec3(0.0, -0.16, 2.5);
+        vec3 eye = vec3(0.0, -0.28, 2.5);
         vec3 look = normalize(vec3(seen * 0.6, -2.0));
 
         float travelled = 0.0, nearest = 1e9, met = -1.0;
@@ -501,7 +536,7 @@
           float edge = pow(1.0 - clamp(dot(n, -look), 0.0, 1.0), 3.0);
           colour = mix(dusk, day, 0.2 + 0.8 * lit);
           colour += edge * dawn * 0.6;
-          colour += pow(clamp(dot(reflect(-sun, n), -look), 0.0, 1.0), 44.0) * 0.9;
+          colour += pow(clamp(dot(reflect(-sun, n), -look), 0.0, 1.0), 44.0) * (geometry < 0.5 ? 0.9 : 0.35);
           colour += pow(clamp(dot(n, normalize(vec3(-0.4, -0.6, 0.5))), 0.0, 1.0), 8.0) * dusk * 0.5;
           there = 1.0;
         } else {

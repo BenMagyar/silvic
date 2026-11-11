@@ -3,8 +3,7 @@
 
 use std::sync::{Arc, Barrier, Mutex};
 
-use crate::collective::Collective;
-use crate::error::Result;
+use crate::{Collective, Result};
 
 struct Shared {
     barrier: Barrier,
@@ -104,26 +103,4 @@ pub fn run_ranks<T: Send>(world: usize, f: impl Fn(usize, &mut ThreadCollective)
             .collect();
         handles.into_iter().map(|h| h.join().expect("rank thread")).collect()
     })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn ranks_agree_on_sums_and_gathers() {
-        let results = run_ranks(3, |rank, collective| {
-            let mut sums = vec![rank as f64, 1.0];
-            collective.allreduce_sum_f64(&mut sums).expect("sum");
-            let mut max = vec![rank as f64];
-            collective.allreduce_max_f64(&mut max).expect("max");
-            let gathered = collective.allgather_bytes(&[rank as u8; 2]).expect("gather");
-            (sums, max, gathered)
-        });
-        for (sums, max, gathered) in results {
-            assert_eq!(sums, vec![3.0, 3.0]);
-            assert_eq!(max, vec![2.0]);
-            assert_eq!(gathered, vec![vec![0, 0], vec![1, 1], vec![2, 2]]);
-        }
-    }
 }

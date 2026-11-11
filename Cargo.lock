@@ -761,7 +761,6 @@ dependencies = [
  "criterion",
  "rayon",
  "serde_json",
- "silvic-core",
  "thiserror",
  "tracing",
 ]

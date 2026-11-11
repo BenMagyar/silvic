@@ -11,7 +11,8 @@
   <link rel="alternate" type="application/rss+xml" title="silvic changelog" href="feed.xml">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600&amp;family=JetBrains+Mono&amp;display=swap">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Faustina:wght@400;500;600&amp;family=JetBrains+Mono:wght@400&amp;display=swap" media="print" onload="this.media='all'">
+  <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Faustina:wght@400;500;600&amp;family=JetBrains+Mono:wght@400&amp;display=swap"></noscript>
   <link rel="stylesheet" href="styles.css">
   <link rel="stylesheet" href="docs.css">
 </head>
@@ -20,31 +21,18 @@
     <header class="masthead deeper">
       <a class="rooted" href="./"><canvas class="growth" width="32" height="32" aria-hidden="true"></canvas>silvic</a>
       <nav class="trail" aria-label="silvic">
-        <a class="homeward" href="./">Overview</a>
+        <a href="how.html">How</a>
         <a href="docs/">Docs</a>
         <a href="changelog.html" aria-current="page">Changelog</a>
       </nav>
     </header>
 
-    <h1>Changelog</h1>
-    <p>Changes to silvic. Follow them with the <a href="feed.xml">RSS feed</a>.</p>
+    <div class="page-heading"><h1>Changelog</h1><a href="feed.xml">RSS</a></div>
 
-    <h2 id="unreleased">Unreleased</h2>
-    <p>The first version: four crates, one of them the Python package.</p>
-    <dl class="manifest">
-      <dt><a href="docs/silvic-core.html"><code>silvic-core</code></a></dt>
-      <dd>LightGBM 3.3.5’s parameters, binning, objectives (<code>regression</code>, <code>binary</code>, <code>lambdarank</code>) and metrics; leaf-wise trees on quantized integer histograms, bit-reproducible on any number of ranks; LightGBM model text, read and written byte for byte; the CPU backend.</dd>
-      <dt><a href="docs/silvic-gpu.html"><code>silvic-gpu</code></a></dt>
-      <dd>Metal and CUDA backends from one kernel source, one device wait per split. Metal matches the CPU backend bit for bit on quantized L2; CUDA compiles but has not run on NVIDIA hardware.</dd>
-      <dt><a href="docs/silvic-net.html"><code>silvic-net</code></a></dt>
-      <dd>TCP ring allreduce and allgather with a token handshake, a fixed fold order, and failures that travel around the ring instead of hanging.</dd>
-      <dt><a href="docs/silvic-python.html"><code>silvic-python</code></a></dt>
-      <dd>The <code>silvic</code> package with LightGBM’s Python API, <code>init_model</code> and scikit-learn estimators, and <code>silvic.ray.train</code>, whose model equals single-process training on the same rows and which resumes from checkpoints when workers or spot nodes are lost.</dd>
-      <dt><a href="docs/silvic-serve.html"><code>silvic-serve</code></a></dt>
-      <dd>Scoring of LightGBM 3.x and 4.x models with LightGBM’s predictions bit for bit, on SIMD byte lanes: 5.2× faster than lleaves 1.1.0 on one core, and <code>silvic.serve.Model</code> where <code>lleaves.Model</code> was.</dd>
-      <dt><a href="docs/silvic-triton.html"><code>silvic-triton</code></a></dt>
-      <dd>A Triton Inference Server backend serving LightGBM models with <code>silvic-serve</code>: FP64 outputs are LightGBM’s predictions bit for bit, FIL’s configs serve with only the backend name changed, and small requests batched together are scored as one matrix. Run on tritonserver 2.51.0 on aarch64 Linux; not yet on x86-64 or a GPU host.</dd>
-    </dl>
+    <h2 id="initial-release">Initial release</h2>
+    <p>silvic trains gradient-boosted trees for L2 regression, binary classification and lambdarank on CPU, Apple Metal, NVIDIA CUDA and AWS Neuron. It reads and writes LightGBM-compatible model files. Training uses its own quantization and can produce different trees from LightGBM.</p>
+    <p>The Python API provides <code>Dataset</code>, <code>train</code>, <code>Booster</code> and scikit-learn estimators. Ray distributed training combines workers into one model and resumes from checkpoints after worker or spot-node loss.</p>
+    <p>Serving supports LightGBM and silvic models. CPU and CUDA serving default to float64, matching LightGBM prediction semantics for supported models. CUDA offers optional float32 serving, and Neuron serving uses explicit float32. The Triton Inference Server backend serves these model files with configuration auto-completion and dynamic batching.</p>
   </main>
   <script src="mark.js"></script>
 </body>

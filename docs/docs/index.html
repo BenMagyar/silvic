@@ -11,7 +11,8 @@
   <link rel="alternate" type="application/rss+xml" title="silvic changelog" href="../feed.xml">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600&amp;family=JetBrains+Mono&amp;display=swap">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Faustina:wght@400;500;600&amp;family=JetBrains+Mono:wght@400&amp;display=swap" media="print" onload="this.media='all'">
+  <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Faustina:wght@400;500;600&amp;family=JetBrains+Mono:wght@400&amp;display=swap"></noscript>
   <link rel="stylesheet" href="../styles.css">
   <link rel="stylesheet" href="../docs.css">
 </head>
@@ -20,26 +21,35 @@
     <header class="masthead deeper">
       <a class="rooted" href="../"><canvas class="growth" width="32" height="32" aria-hidden="true"></canvas>silvic</a>
       <nav class="trail" aria-label="silvic">
-        <a class="homeward" href="../">Overview</a>
+        <a href="../how.html">How</a>
         <a href="./" aria-current="page">Docs</a>
         <a href="../changelog.html">Changelog</a>
       </nav>
     </header>
 
     <h1>Docs</h1>
-    <p>silvic, LightGBM-compatible gradient boosting, is six Rust crates, one of which builds the <code>silvic</code> Python package, version 0.1.0 (<a href="../changelog.html">changelog</a>). Install it into Python 3.10 or newer; the <code>ray</code> extra adds what <code>silvic.ray</code> needs:</p>
+    <p>silvic trains and serves LightGBM-compatible models through its Rust crates and Python package. The <code>ray</code> extra adds dependencies for distributed training with <code>silvic.ray</code>:</p>
     <pre tabindex="0"><code><span class="word">pip install</span> silvic
 <span class="word">pip install</span> <span class="said">"silvic[ray]"</span></code></pre>
-    <p>Then train as with LightGBM, with the same parameter names:</p>
+    <p>Training accepts LightGBM parameter names:</p>
     <pre tabindex="0"><code><span class="word">import</span> silvic
 <span class="word">import</span> silvic.serve
 
 params = {<span class="said">"objective"</span>: <span class="said">"lambdarank"</span>, <span class="said">"num_leaves"</span>: <span class="said">53</span>, <span class="said">"device_type"</span>: <span class="said">"auto"</span>}
-train_set = silvic.Dataset(X, label=y, group=query_sizes, categorical_feature=[<span class="said">131</span>, <span class="said">132</span>])
+train_set = silvic.Dataset(
+    X, label=y, group=query_sizes, categorical_feature=[<span class="said">131</span>, <span class="said">132</span>]
+)
 booster = silvic.train(params, train_set, num_boost_round=<span class="said">1500</span>)
 scores = booster.predict(X_test)
-fast_scores = silvic.serve.Predictor(booster).predict(X_test)  # the same scores, faster</code></pre>
-    <p>Rust 1.94.1 or newer builds it. Metal runs on Apple silicon; CUDA needs an NVIDIA driver and NVRTC from CUDA 12, and has not yet run on NVIDIA hardware.</p>
+fast_scores = silvic.serve.Predictor(booster).predict(X_test)</code></pre>
+    <h2 id="requirements" class="requirements-heading">Requirements</h2>
+    <ul class="tag-list" role="list" aria-labelledby="requirements">
+      <li><b>Python</b> 3.10+</li>
+      <li><b>Source builds</b> Rust 1.94.1+</li>
+      <li><b>Metal</b> macOS · Apple silicon</li>
+      <li><b>CUDA</b> Linux · NVIDIA driver + NVRTC (CUDA 12)</li>
+      <li><b>Neuron</b> Linux · Neuron driver/runtime + compiler</li>
+    </ul>
 
     <h2>Package and crates</h2>
     <dl class="manifest">
@@ -49,10 +59,12 @@ fast_scores = silvic.serve.Predictor(booster).predict(X_test)  # the same scores
       <dd>Parameters, binning, objectives, metrics, leaf-wise trees on integer histograms, LightGBM model text, and the CPU backend.</dd>
       <dt><a href="silvic-gpu.html"><code>silvic-gpu</code></a></dt>
       <dd>The Metal and CUDA backends, from one kernel source compiled at run time.</dd>
+      <dt><a href="silvic-neuron.html"><code>silvic-neuron</code></a></dt>
+      <dd>AWS Neuron training and explicit float32 serving, with NKI kernels and the native runtime.</dd>
       <dt><a href="silvic-net.html"><code>silvic-net</code></a></dt>
       <dd>TCP ring collectives for distributed training.</dd>
       <dt><a href="silvic-serve.html"><code>silvic-serve</code></a></dt>
-      <dd>Scoring of LightGBM models, bit for bit LightGBM’s predictions, on SIMD byte lanes: 5× faster than lleaves.</dd>
+      <dd>Exact scoring of LightGBM models on CPU SIMD lanes or explicitly selected NVIDIA CUDA devices.</dd>
       <dt><a href="silvic-triton.html"><code>silvic-triton</code></a></dt>
       <dd>A Triton Inference Server backend serving LightGBM models with <code>silvic-serve</code>, where the FIL backend’s configs serve unchanged but for its name.</dd>
     </dl>

@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>silvic-neuron · silvic</title>
+  <meta name="description" content="AWS Neuron training and explicit float32 serving for silvic, with NKI kernels and the native Neuron Runtime.">
+  <link rel="icon" href="../favicon.ico" sizes="32x32">
+  <link rel="icon" href="../favicon.png" type="image/png" sizes="96x96">
+  <link rel="apple-touch-icon" href="../apple-touch-icon.png">
+  <link rel="alternate" type="application/rss+xml" title="silvic changelog" href="../feed.xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Faustina:wght@400;500;600&amp;family=JetBrains+Mono:wght@400&amp;display=swap" media="print" onload="this.media='all'">
+  <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Faustina:wght@400;500;600&amp;family=JetBrains+Mono:wght@400&amp;display=swap"></noscript>
+  <link rel="stylesheet" href="../styles.css">
+  <link rel="stylesheet" href="../docs.css">
+</head>
+<body>
+  <main>
+    <header class="masthead deeper">
+      <a class="rooted" href="../"><canvas class="growth" width="32" height="32" aria-hidden="true"></canvas>silvic</a>
+      <nav class="trail" aria-label="silvic">
+        <a href="../how.html">How</a>
+        <a href="./" aria-current="true">Docs</a>
+        <a href="../changelog.html">Changelog</a>
+      </nav>
+    </header>
+
+    <h1><code>silvic-neuron</code></h1>
+    <p><code>silvic-neuron</code> trains and serves LightGBM-compatible models on AWS Neuron accelerators. It runs on Linux with Trainium, Trainium2 or Inferentia2, using NKI kernels through the Neuron Runtime. Serving uses float32 arithmetic, and training and serving require explicit device selection.</p>
+    <h2>Setup</h2>
+    <p>Execution requires the <a href="https://awsdocs-neuron.readthedocs-hosted.com/en/v2.25.0/neuron-runtime/nrt-api-guide.html#requirements">Neuron driver and runtime</a> on the accelerator host and a separate Linux x86-64 Python 3.11 environment for the compiler. The Rust crate builds without the Neuron SDK or PyTorch. Create the compiler environment and set the runtime paths before starting the process:</p>
+    <pre tabindex="0"><code>python3.11 -m venv .venv-neuron
+.venv-neuron/bin/pip install --extra-index-url https://pip.repos.neuron.amazonaws.com \
+    'neuronx-cc==2.21.18209.0+043b1bf7' 'numpy==1.26.4' 'scipy==1.12.0'
+export SILVIC_NEURON_PYTHON="$PWD/.venv-neuron/bin/python"
+export SILVIC_NEURON_LIBRARY=/opt/aws/neuron/lib/libnrt.so
+export NEURON_LOGICAL_NC_CONFIG=1</code></pre>
+    <p>Trainium2 requires <a href="https://awsdocs-neuron.readthedocs-hosted.com/en/v2.31.1/about-neuron/arch/neuron-features/logical-neuroncore-config.html">logical-core configuration 1</a> to match the single-core compiled kernels. The compiler adapter requires the pinned <code>neuronx-cc</code> version. silvic caches compiled kernels by source, shapes, constants, target and compiler version under <code>$XDG_CACHE_HOME/silvic/neuron</code> or <code>~/.cache/silvic/neuron</code>. <code>SILVIC_NEURON_CACHE</code> overrides the directory.</p>
+
+    <h2>Training</h2>
+    <pre tabindex="0"><code><span class="word">import</span> silvic
+
+booster = silvic.train(
+    {<span class="said">"objective"</span>: <span class="said">"lambdarank"</span>, <span class="said">"device_type"</span>: <span class="said">"neuron"</span>},
+    silvic.Dataset(X, label=y, group=query_sizes),
+    num_boost_round=<span class="said">200</span>,
+)</code></pre>
+    <p>During training, binned rows, partitions and scores stay on the device, where NKI kernels build histograms, partition rows, reduce leaf gradients and update scores. The host computes objectives, quantizes gradients, selects bags and searches for splits. Bounded integer tiles preserve exact quantized histograms, and signed radix-2<sup>16</sup> limbs preserve fixed-point leaf sums during device reductions. Float histograms are approximate.</p>
+    <p>The <code>gpu_device_id</code> parameter selects a logical NeuronCore within <code>NEURON_RT_VISIBLE_CORES</code>. The <code>auto</code> selector considers CUDA, Metal and CPU, while <code>gpu</code> considers CUDA and Metal.</p>
+    <p>For distributed training, <a href="silvic-python.html#ray"><code>silvic.ray.train</code></a> reserves one <code>neuron_cores</code> resource per worker by default when <code>device_type="neuron"</code>. Each backend uses one logical core, with Ray setting core visibility and workers reducing histograms over the TCP ring. Combining Neuron selection with <code>use_gpu=True</code> or GPU resource reservations raises a <code>ValueError</code>.</p>
+
+    <h2>Serving</h2>
+    <pre tabindex="0"><code><span class="word">import</span> silvic.serve
+
+predictor = silvic.serve.Predictor(booster, device=<span class="said">"neuron"</span>, precision=<span class="said">"float32"</span>)
+scores = predictor.predict(X_test)</code></pre>
+    <p>The predictor retains the forest and reusable buffers on the device, and it adds float32 leaf values in tree order. It supports numerical and categorical splits, missing values and tree prefixes. Float64 inputs are converted to float32 before prediction; thresholds, leaves, accumulation and output also use float32, so predictions are approximate.</p>
+    <p><code>silvic.serve.Predictor</code> requires explicit <code>precision="float32"</code> and <code>num_threads=1</code> when <code>device="neuron"</code>. An explicit CPU <code>kernel</code> selection raises a <code>ValueError</code>. CPU and CUDA serving default to float64.</p>
+
+    <h2>Rust API</h2>
+    <dl class="manifest">
+      <dt><code>NeuronBackend::new(ordinal)</code></dt>
+      <dd>Implements <a href="silvic-core.html"><code>silvic_core::Backend</code></a>. <code>None</code> selects logical core 0. Oversized datasets or models fail explicitly at the signed 32-bit device-address limit.</dd>
+      <dt><code>NeuronPredictor::new(&amp;model, ordinal)</code></dt>
+      <dd><code>predict(&amp;rows, raw_score, num_trees)</code> returns float32 scores; <code>predict_raw(&amp;rows, num_trees, &amp;mut out)</code> reuses a caller’s float32 output buffer. Both accept row- or column-major float32 or float64 matrices.</dd>
+      <dt><code>is_available()</code></dt>
+      <dd>Probes visible NeuronCores without initializing the runtime or reserving workers’ cores. Training and serving return runtime, device and compiler errors.</dd>
+    </dl>
+
+    <nav class="onward" aria-label="Crates">
+      <a href="silvic-gpu.html">← <code>silvic-gpu</code></a>
+      <a class="next" href="silvic-net.html"><code>silvic-net</code> →</a>
+    </nav>
+  </main>
+  <script src="../mark.js"></script>
+</body>
+</html>

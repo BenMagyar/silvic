@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>How it works · silvic</title>
+  <meta name="description" content="How silvic reduces training histogram work and scores numerical trees with CPU SIMD.">
+  <link rel="icon" href="favicon.ico" sizes="32x32">
+  <link rel="icon" href="favicon.png" type="image/png" sizes="96x96">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Faustina:wght@400;500;600&amp;family=JetBrains+Mono:wght@400&amp;display=swap" media="print" onload="this.media='all'">
+  <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Faustina:wght@400;500;600&amp;family=JetBrains+Mono:wght@400&amp;display=swap"></noscript>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="docs.css">
+  <link rel="stylesheet" href="how.css">
+</head>
+<body>
+  <main>
+    <header class="masthead deeper">
+      <a class="rooted" href="./"><canvas class="growth" width="32" height="32" aria-hidden="true"></canvas>silvic</a>
+      <nav class="trail" aria-label="silvic">
+        <a href="how.html" aria-current="page">How</a>
+        <a href="docs/">Docs</a>
+        <a href="changelog.html">Changelog</a>
+      </nav>
+    </header>
+
+    <nav class="how-topics" aria-label="How sections">
+      <a href="#training">Training</a>
+      <a href="#serving">Serving</a>
+      <a href="how-diagrams.html">Diagram options</a>
+    </nav>
+
+    <h1>How it works</h1>
+    <section aria-labelledby="training">
+      <h2 id="training">Training</h2>
+      <p>LightGBM and silvic both recover a sibling histogram by subtracting a built child’s histogram from its parent’s. LightGBM defaults to separate floating-point gradient and hessian sums. silvic’s CPU path quantizes and packs each pair into an integer, so one addition updates both sums in a bin. This reduces bin-update work; the <a href="./#training">training benchmark</a> also includes binning, fitting and validation.</p>
+      <figure class="how-visual">
+        <img src="how-training-flow.svg" alt="For a row and feature bin, LightGBM's default accumulates gradient and hessian values separately. silvic quantizes and packs the pair before one integer histogram addition." width="360" height="300">
+        <figcaption>Quantizing and packing the gradient–hessian pair lets silvic update a histogram bin with one integer addition, compared with two separate accumulations in LightGBM’s default.</figcaption>
+      </figure>
+    </section>
+    <section aria-labelledby="serving">
+      <h2 id="serving">Serving</h2>
+      <p>lleaves compiles code for each model. silvic uses shared CPU SIMD kernels: one threshold rank covers several splits, while masks remove unreachable leaves across rows. The kernel finds the surviving leaf positions with SIMD and reads their values per lane. This reduces prediction work. The <a href="./#scoring">serving benchmark</a> excludes compilation.</p>
+      <figure class="how-visual">
+        <img src="how-serving-lanes.svg" alt="Several rows share a SIMD mask operation across leaf tiles. Unreachable leaves are hatched, a surviving leaf is selected in each row, and the kernel reads its corresponding value separately for that row." width="360" height="327">
+        <figcaption>The SIMD kernel applies masks across rows to find their surviving leaves, then reads the corresponding value for each row.</figcaption>
+      </figure>
+    </section>
+  </main>
+  <script src="mark.js"></script>
+</body>
+</html>

@@ -19,6 +19,30 @@ h2 code {
   font-size: 0.9em;
 }
 
+.page-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--a-branch);
+  margin-block-end: var(--a-bough);
+}
+
+.page-heading h1 {
+  margin: 0;
+}
+
+.page-heading > a {
+  flex: none;
+  font-size: var(--speaking-softly);
+}
+
+.requirements-heading {
+  margin: 0 0 var(--a-sprout);
+  padding: 0;
+  border: 0;
+  font-size: var(--speaking-softly);
+}
+
 .manifest {
   margin: 0 0 var(--a-bough);
 }

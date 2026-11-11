@@ -11,7 +11,8 @@
   <link rel="alternate" type="application/rss+xml" title="silvic changelog" href="../feed.xml">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600&amp;family=JetBrains+Mono&amp;display=swap">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Faustina:wght@400;500;600&amp;family=JetBrains+Mono:wght@400&amp;display=swap" media="print" onload="this.media='all'">
+  <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Faustina:wght@400;500;600&amp;family=JetBrains+Mono:wght@400&amp;display=swap"></noscript>
   <link rel="stylesheet" href="../styles.css">
   <link rel="stylesheet" href="../docs.css">
 </head>
@@ -20,14 +21,14 @@
     <header class="masthead deeper">
       <a class="rooted" href="../"><canvas class="growth" width="32" height="32" aria-hidden="true"></canvas>silvic</a>
       <nav class="trail" aria-label="silvic">
-        <a class="homeward" href="../">Overview</a>
+        <a href="../how.html">How</a>
         <a href="./" aria-current="true">Docs</a>
         <a href="../changelog.html">Changelog</a>
       </nav>
     </header>
 
     <h1><code>silvic-core</code></h1>
-    <p>Gradient boosting as LightGBM 3.3.5 does it: its parameters, binning, objectives, metrics and split search, leaf-wise trees on quantized integer histograms, and its model text. Training runs through a <code>Backend</code>, this crate’s <code>CpuBackend</code> or the Metal and CUDA backends of <a href="silvic-gpu.html"><code>silvic-gpu</code></a>, and reduces histograms across ranks through a <code>Collective</code>: <code>LocalCollective</code> in one process, the TCP ring of <a href="silvic-net.html"><code>silvic-net</code></a> across many.</p>
+    <p><code>silvic-core</code> provides silvic’s parameter handling, binning, objectives, metrics, split search and LightGBM 3.3.5 model text. It grows trees leaf by leaf using quantized integer histograms. Training uses the <code>Backend</code> interface with this crate’s <code>CpuBackend</code>, the Metal and CUDA backends of <a href="silvic-gpu.html"><code>silvic-gpu</code></a>, or the AWS Neuron backend of <a href="silvic-neuron.html"><code>silvic-neuron</code></a>. Histograms reduce across ranks through a <code>Collective</code>, using <code>LocalCollective</code> in one process or the TCP ring of <a href="silvic-net.html"><code>silvic-net</code></a> across processes.</p>
     <pre tabindex="0"><code><span class="word">let</span> params = Params::from_json(<span class="said">r#"{"objective": "lambdarank", "num_iterations": 100}"#</span>)?;
 <span class="word">let</span> train_set = BinnedDataset::construct(&amp;input, &amp;params, &amp;<span class="word">mut</span> LocalCollective)?;
 <span class="word">let</span> model = train(&amp;params, &amp;train_set, &amp;[], &amp;<span class="word">mut</span> CpuBackend::new(), &amp;<span class="word">mut</span> LocalCollective, &amp;<span class="word">mut</span> |_| Ok(()))?;
