@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "silvic"
-description = "LightGBM-compatible gradient boosting on CPU, Metal and CUDA, single-node or distributed on Ray"
+description = "LightGBM-compatible gradient boosting on CPU, Metal, CUDA and AWS Neuron, single-node or distributed on Ray"
 requires-python = ">=3.10"
 keywords = ["lightgbm", "gbdt", "lambdarank", "ray", "gpu"]
 classifiers = [

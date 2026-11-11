@@ -35,6 +35,9 @@ concurrently, reducing histograms over the TCP ring.
 
 ``use_gpu=True`` reserves one Ray GPU per actor, which CUDA training uses; ``device_type`` in ``params`` picks the
 device as in ``silvic.train`` (``auto`` takes CUDA, then Metal, then the CPU). Metal needs no Ray GPU resource.
+Explicit ``device_type="neuron"`` reserves one ``neuron_cores`` per actor unless ``resources_per_worker`` specifies
+a positive whole count. It cannot be combined with ``use_gpu`` or GPU resources. Ray sets
+``NEURON_RT_VISIBLE_CORES`` for each actor; silvic does not override its accelerator visibility.
 ``timeout_s`` bounds the first placement, the TCP rendezvous, and how long a collective waits on a silent peer.
 
 Failures and preemption
@@ -77,17 +80,27 @@ try:
     import pandas as pd
     import pyarrow as pa
     import pyarrow.compute as pc
-
     import ray
-    from ray.util.placement_group import placement_group, placement_group_table, remove_placement_group
-    from ray.util.scheduling_strategies import NodeAffinitySchedulingStrategy, PlacementGroupSchedulingStrategy
+    from ray.util.placement_group import (
+        placement_group,
+        placement_group_table,
+        remove_placement_group,
+    )
+    from ray.util.scheduling_strategies import (
+        NodeAffinitySchedulingStrategy,
+        PlacementGroupSchedulingStrategy,
+    )
 except ImportError as missing:
     raise ImportError("silvic.ray needs Ray: pip install 'silvic[ray]'") from missing
 
-from . import _params
-from . import _silvic
+from . import _params, _silvic
 from .basic import Booster
-from .engine import _IterationHook, _prepare_callbacks, _reject_early_stopping, _resolve_num_iterations
+from .engine import (
+    _IterationHook,
+    _prepare_callbacks,
+    _reject_early_stopping,
+    _resolve_num_iterations,
+)
 
 # Seconds the driver waits, after the first actor failure, for the other actors' errors before choosing the root.
 _FAILURE_GRACE_S = 5.0
@@ -136,11 +149,20 @@ class _Spec:
         return [self.feature_columns.index(c) for c in self.categorical_features]
 
 
-def _make_spec(names, label_column, group_column, weight_column, feature_columns, categorical_features):
+def _make_spec(
+    names,
+    label_column,
+    group_column,
+    weight_column,
+    feature_columns,
+    categorical_features,
+):
     reserved = {label_column, group_column, weight_column} - {None}
     missing = [c for c in reserved if c not in names]
     if missing:
-        raise ValueError(f"columns {missing} are not in the dataset (columns: {list(names)})")
+        raise ValueError(
+            f"columns {missing} are not in the dataset (columns: {list(names)})"
+        )
     if feature_columns is None:
         feature_columns = [c for c in names if c not in reserved]
     feature_columns = tuple(feature_columns)
@@ -153,7 +175,9 @@ def _make_spec(names, label_column, group_column, weight_column, feature_columns
     unknown = [c for c in categorical_features if c not in feature_columns]
     if unknown:
         raise ValueError(f"categorical features {unknown} are not feature columns")
-    return _Spec(label_column, group_column, weight_column, feature_columns, categorical_features)
+    return _Spec(
+        label_column, group_column, weight_column, feature_columns, categorical_features
+    )
 
 
 def _decoded(column):
@@ -198,14 +222,21 @@ def _split_table(table, spec, num_workers):
     """``table``'s rows per rank (compact copies, so each piece serialises alone)."""
     ranks = _row_ranks(table, spec, num_workers)
     order = np.argsort(ranks, kind="stable")
-    offsets = np.concatenate(([0], np.cumsum(np.bincount(ranks, minlength=num_workers))))
-    return [table.take(pa.array(order[offsets[r] : offsets[r + 1]])) for r in range(num_workers)]
+    offsets = np.concatenate(
+        ([0], np.cumsum(np.bincount(ranks, minlength=num_workers)))
+    )
+    return [
+        table.take(pa.array(order[offsets[r] : offsets[r + 1]]))
+        for r in range(num_workers)
+    ]
 
 
 def _order_table(table, spec):
     """``table`` sorted into the rank's training order (``_Spec.sort_columns``, NaN and nulls last)."""
     table = _normalized(table)
-    indices = pc.sort_indices(table, sort_keys=[(name, "ascending") for name in spec.sort_columns])
+    indices = pc.sort_indices(
+        table, sort_keys=[(name, "ascending") for name in spec.sort_columns]
+    )
     return table.take(indices)
 
 
@@ -214,15 +245,25 @@ def _feature_dtype(table, spec):
     dtypes = []
     for name in spec.feature_columns:
         kind = table.schema.field(name).type
-        if not (pa.types.is_integer(kind) or pa.types.is_floating(kind) or pa.types.is_boolean(kind)):
-            raise ValueError(f"feature column {name!r} has type {kind}; features must be numeric or bool")
+        if not (
+            pa.types.is_integer(kind)
+            or pa.types.is_floating(kind)
+            or pa.types.is_boolean(kind)
+        ):
+            raise ValueError(
+                f"feature column {name!r} has type {kind}; features must be numeric or bool"
+            )
         dtypes.append(np.dtype(kind.to_pandas_dtype()))
     return np.result_type(*dtypes, np.float32)
 
 
 def _float_column(table, name, dtype):
     """``name`` as a ``dtype`` array with nulls as NaN."""
-    return pc.cast(table.column(name), pa.float64()).to_numpy(zero_copy_only=False).astype(dtype, copy=False)
+    return (
+        pc.cast(table.column(name), pa.float64())
+        .to_numpy(zero_copy_only=False)
+        .astype(dtype, copy=False)
+    )
 
 
 def _group_sizes(table, spec):
@@ -239,13 +280,19 @@ def _group_sizes(table, spec):
 def _training_arrays(table, spec):
     """``(features, label, weight, group)`` of an ordered table, features column-major."""
     dtype = _feature_dtype(table, spec)
-    features = np.empty((table.num_rows, len(spec.feature_columns)), dtype=dtype, order="F")
+    features = np.empty(
+        (table.num_rows, len(spec.feature_columns)), dtype=dtype, order="F"
+    )
     for j, name in enumerate(spec.feature_columns):
         features[:, j] = _float_column(table, name, dtype)
     if table.column(spec.label_column).null_count:
         raise ValueError(f"label column {spec.label_column!r} has nulls")
     label = _float_column(table, spec.label_column, np.float32)
-    weight = _float_column(table, spec.weight_column, np.float32) if spec.weight_column is not None else None
+    weight = (
+        _float_column(table, spec.weight_column, np.float32)
+        if spec.weight_column is not None
+        else None
+    )
     group = _group_sizes(table, spec) if spec.group_column is not None else None
     return features, label, weight, group
 
@@ -267,7 +314,12 @@ def ordered_partitions(
     """
     table = pa.Table.from_pandas(data, preserve_index=False)
     spec = _make_spec(
-        table.column_names, label_column, group_column, weight_column, feature_columns, categorical_features
+        table.column_names,
+        label_column,
+        group_column,
+        weight_column,
+        feature_columns,
+        categorical_features,
     )
     pieces = _split_table(_normalized(table.select(spec.columns)), spec, num_workers)
     return [_order_table(piece, spec).to_pandas() for piece in pieces]
@@ -293,8 +345,14 @@ def _partition(dataset, spec, num_workers):
     for bundle in dataset.select_columns(spec.columns).iter_internal_ref_bundles():
         slices = getattr(bundle, "slices", None) or (None,) * len(bundle.block_refs)
         for block_ref, block_slice in zip(bundle.block_refs, slices):
-            start, end = (block_slice.start_offset, block_slice.end_offset) if block_slice is not None else (None, None)
-            refs = _split_block.options(num_returns=num_workers).remote(block_ref, start, end, spec, num_workers)
+            start, end = (
+                (block_slice.start_offset, block_slice.end_offset)
+                if block_slice is not None
+                else (None, None)
+            )
+            refs = _split_block.options(num_returns=num_workers).remote(
+                block_ref, start, end, spec, num_workers
+            )
             for rank, ref in enumerate([refs] if num_workers == 1 else refs):
                 pieces[rank].append(ref)
     # Split tasks hold CPUs the placement group may need; let them finish before reserving it.
@@ -400,7 +458,12 @@ class _Worker:
         valid = []
         for name, (v_features, v_label, v_weight, v_group) in valid_arrays:
             dataset = _silvic.Dataset.construct_with_reference(
-                v_features, v_label, train_set, weight=v_weight, group=v_group, collective=collective
+                v_features,
+                v_label,
+                train_set,
+                weight=v_weight,
+                group=v_group,
+                collective=collective,
             )
             valid.append((name, dataset))
         return train_set, valid
@@ -410,17 +473,24 @@ class _Worker:
         spec = job["spec"]
         arrays = _training_arrays(_load(train_pieces, spec, self.rank), spec)
         valid_arrays = [
-            (name, _training_arrays(_load(pieces, spec, self.rank), spec)) for name, pieces in valid_pieces
+            (name, _training_arrays(_load(pieces, spec, self.rank), spec))
+            for name, pieces in valid_pieces
         ]
         collective = _silvic.connect(
-            self.listener, self.rank, job["addresses"], job["token"], timeout_s=job["timeout_s"]
+            self.listener,
+            self.rank,
+            job["addresses"],
+            job["token"],
+            timeout_s=job["timeout_s"],
         )
         train_set, valid = self._datasets(job, collective, arrays, valid_arrays)
         del arrays, valid_arrays
         hook = None
         if self.rank == 0:
             callbacks = _prepare_callbacks(None, job["verbose_eval"], None)
-            evaluation = _IterationHook(callbacks, job["params"], job["remaining"], job["begin_iteration"])
+            evaluation = _IterationHook(
+                callbacks, job["params"], job["remaining"], job["begin_iteration"]
+            )
             hook = _RankZeroHook(evaluation, job)
         # Ray datasets are tables without pandas `category` columns, which LightGBM records as `[]`, as silvic.train
         # does for such a DataFrame.
@@ -441,8 +511,25 @@ class _Worker:
 _RemoteWorker = ray.remote(max_restarts=0, max_task_retries=0)(_Worker)
 
 
-def _worker_resources(resources_per_worker, use_gpu):
+def _worker_resources(resources_per_worker, use_gpu, params):
     resources = dict(resources_per_worker or {"CPU": 1})
+    device_keys = _params.find(params, "device_type")
+    device = params[device_keys[0]] if device_keys else "auto"
+    if device == "neuron":
+        if use_gpu or resources.get("GPU", 0):
+            raise ValueError(
+                'device_type="neuron" cannot be combined with use_gpu or GPU resources'
+            )
+        cores = resources.setdefault("neuron_cores", 1)
+        if (
+            isinstance(cores, bool)
+            or not isinstance(cores, (int, float))
+            or not cores > 0
+            or cores % 1 != 0
+        ):
+            raise ValueError("neuron_cores must be a positive whole number")
+    elif "neuron_cores" in resources:
+        raise ValueError('neuron_cores resources require explicit device_type="neuron"')
     if use_gpu:
         resources.setdefault("GPU", 1)
     return {key: value for key, value in resources.items() if value}
@@ -471,7 +558,9 @@ def _cause(error):
 
 def _is_worker_loss(error):
     cause = _cause(error)
-    return isinstance(error, _WORKER_LOSS) or isinstance(cause, (*_WORKER_LOSS, _silvic.CollectiveError))
+    return isinstance(error, _WORKER_LOSS) or isinstance(
+        cause, (*_WORKER_LOSS, _silvic.CollectiveError)
+    )
 
 
 def _root_error(errors):
@@ -511,7 +600,9 @@ def _gather(refs, timeout_s=None):
             try:
                 results[rank] = ray.get(ref)
             except Exception as error:  # noqa: BLE001 - any worker failure ends the attempt
-                raise _RankFailed(*_root_error([(rank, error), *_more_errors(pending)])) from None
+                raise _RankFailed(
+                    *_root_error([(rank, error), *_more_errors(pending)])
+                ) from None
     return results
 
 
@@ -519,7 +610,9 @@ def _more_errors(pending):
     """Errors of the ``pending`` refs that finish within the grace period."""
     if not pending:
         return []
-    done, _ = ray.wait(list(pending), num_returns=len(pending), timeout=_FAILURE_GRACE_S)
+    done, _ = ray.wait(
+        list(pending), num_returns=len(pending), timeout=_FAILURE_GRACE_S
+    )
     errors = []
     for ref in done:
         try:
@@ -548,7 +641,11 @@ def _bundle_nodes(pg, num_workers):
     labels = []
     for rank in range(num_workers):
         node_id = bundles.get(rank)
-        labels.append(f"{addresses.get(node_id, '?')} (node {str(node_id)[:8]})" if node_id else "an unknown node")
+        labels.append(
+            f"{addresses.get(node_id, '?')} (node {str(node_id)[:8]})"
+            if node_id
+            else "an unknown node"
+        )
     return labels
 
 
@@ -557,7 +654,9 @@ def _evals_result(history):
     result = {}
     for _, evals in history:
         for data_name, eval_name, value, _ in evals:
-            result.setdefault(data_name, collections.OrderedDict()).setdefault(eval_name, []).append(value)
+            result.setdefault(data_name, collections.OrderedDict()).setdefault(
+                eval_name, []
+            ).append(value)
     return result
 
 
@@ -591,7 +690,10 @@ class _Job:
     def _pieces_for(self, num_workers):
         if num_workers not in self.pieces:
             train_pieces = _partition(self.train_dataset, self.spec, num_workers)
-            valid_pieces = [(name, _partition(ds, self.spec, num_workers)) for name, ds in self.valid_datasets]
+            valid_pieces = [
+                (name, _partition(ds, self.spec, num_workers))
+                for name, ds in self.valid_datasets
+            ]
             self.pieces = {num_workers: (train_pieces, valid_pieces)}
         return self.pieces[num_workers]
 
@@ -611,7 +713,9 @@ class _Job:
                 raise TimeoutError(
                     f"Ray could not place {num_workers} workers with {self.resources} each within {timeout_s} s"
                 )
-            _warn(f"could not place {num_workers} workers within {timeout_s} s; trying {num_workers - 1}")
+            _warn(
+                f"could not place {num_workers} workers within {timeout_s} s; trying {num_workers - 1}"
+            )
             num_workers -= 1
 
     def _job(self, attempt, addresses, start):
@@ -639,15 +743,23 @@ class _Job:
         train_pieces, valid_pieces = self._pieces_for(num_workers)
         workers = [
             _RemoteWorker.options(
-                **_actor_options(self.resources, pg, rank, f"silvic-{self.job_id}-a{attempt}-r{rank}")
+                **_actor_options(
+                    self.resources, pg, rank, f"silvic-{self.job_id}-a{attempt}-r{rank}"
+                )
             ).remote(rank, num_workers)
             for rank in range(num_workers)
         ]
         try:
-            addresses = _gather([worker.bind.remote() for worker in workers], self.options["timeout_s"])
+            addresses = _gather(
+                [worker.bind.remote() for worker in workers], self.options["timeout_s"]
+            )
             job = self._job(attempt, addresses, start)
             refs = [
-                worker.train.remote(job, train_pieces[rank], [(name, p[rank]) for name, p in valid_pieces])
+                worker.train.remote(
+                    job,
+                    train_pieces[rank],
+                    [(name, p[rank]) for name, p in valid_pieces],
+                )
                 for rank, worker in enumerate(workers)
             ]
             return _gather(refs)[0]
@@ -660,10 +772,18 @@ class _Job:
         cause = _cause(failed.error)
         if isinstance(cause, ray.exceptions.ObjectLostError):
             self.pieces = {}
-        start = _Checkpoint(*ray.get(self.keeper.resume.remote(attempt), timeout=self.options["timeout_s"]))
+        start = _Checkpoint(
+            *ray.get(
+                self.keeper.resume.remote(attempt), timeout=self.options["timeout_s"]
+            )
+        )
         if start.trees >= self.num_iterations:
             return start, None, num_workers
-        pg, placed = self._place(num_workers, self.options["replacement_timeout_s"], self.options["min_workers"])
+        pg, placed = self._place(
+            num_workers,
+            self.options["replacement_timeout_s"],
+            self.options["min_workers"],
+        )
         if placed < num_workers:
             _warn(
                 f"continuing on {placed} workers instead of {num_workers}: rows are repartitioned, so the model "
@@ -678,7 +798,9 @@ class _Job:
     def run(self, num_workers):
         """Trains to the end, resuming after worker failures; returns ``(model_str, history)``."""
         max_failures = self.options["max_failures"]
-        pg, num_workers = self._place(num_workers, self.options["timeout_s"], num_workers)
+        pg, num_workers = self._place(
+            num_workers, self.options["timeout_s"], num_workers
+        )
         start = _Checkpoint()
         attempt = 1
         while True:
@@ -690,7 +812,10 @@ class _Job:
                 if not _is_worker_loss(failed.error):
                     raise failed.error from None
                 if attempt > max_failures:
-                    _add_note(failed.error, f"silvic.ray.train gave up after {attempt} attempts")
+                    _add_note(
+                        failed.error,
+                        f"silvic.ray.train gave up after {attempt} attempts",
+                    )
                     raise failed.error from None
                 lost = failed
             finally:
@@ -724,8 +849,12 @@ def _job_params(params, num_boost_round, resources_per_worker):
 
 def _start_keeper(job_id):
     """The checkpoint keeper, on the driver's node so that losing worker nodes never loses checkpoints."""
-    node = NodeAffinitySchedulingStrategy(node_id=ray.get_runtime_context().get_node_id(), soft=False)
-    return _RemoteKeeper.options(scheduling_strategy=node, name=f"silvic-{job_id}-keeper").remote()
+    node = NodeAffinitySchedulingStrategy(
+        node_id=ray.get_runtime_context().get_node_id(), soft=False
+    )
+    return _RemoteKeeper.options(
+        scheduling_strategy=node, name=f"silvic-{job_id}-keeper"
+    ).remote()
 
 
 def train(
@@ -759,7 +888,9 @@ def train(
     ``num_boost_round``, ``evals_result`` and ``verbose_eval`` mean what they mean in ``silvic.train``; evaluation
     results print from rank 0, and ``evals_result`` holds one continuous history across resumes.
     ``resources_per_worker`` (default ``{"CPU": 1}``) is one placement-group bundle; an explicit ``CPU`` count also
-    sets ``num_threads`` unless ``params`` does.
+    sets ``num_threads`` unless ``params`` does. Explicit ``device_type="neuron"`` adds ``neuron_cores: 1`` by default;
+    override that resource with a positive whole count if needed. Neuron workers cannot request GPU resources or
+    ``use_gpu=True``. Ray owns ``NEURON_RT_VISIBLE_CORES``; no device IDs need to be assigned by the caller.
 
     ``max_failures`` worker failures are resumed from the latest of the checkpoints taken every
     ``checkpoint_period`` iterations; ``min_workers`` (default ``num_workers``: never shrink) is the fewest workers a
@@ -773,6 +904,7 @@ def train(
     if max_failures < 0 or checkpoint_period < 0:
         raise ValueError("max_failures and checkpoint_period must be non-negative")
     params, num_iterations = _job_params(params, num_boost_round, resources_per_worker)
+    resources = _worker_resources(resources_per_worker, use_gpu, params)
     spec = _make_spec(
         train_dataset.schema().names,
         label_column,
@@ -791,7 +923,7 @@ def train(
         "replacement_timeout_s": replacement_timeout_s,
     }
     datasets = (train_dataset, list((valid_datasets or {}).items()))
-    job = _Job(spec, datasets, params, num_iterations, _worker_resources(resources_per_worker, use_gpu), options)
+    job = _Job(spec, datasets, params, num_iterations, resources, options)
     job.keeper = _start_keeper(job.job_id)
     try:
         model_str, history = job.run(num_workers)

@@ -52,7 +52,9 @@ def _shutdown_ray():
 @pytest.fixture
 def local_ray():
     if not ray.is_initialized():
-        ray.init(address="local", num_cpus=6, include_dashboard=False, log_to_driver=False)
+        ray.init(
+            address="local", num_cpus=6, include_dashboard=False, log_to_driver=False
+        )
     yield
 
 
@@ -61,7 +63,9 @@ def spot_cluster():
     """A head node without CPUs and three worker nodes with one ``slot`` each, as spot nodes would hold one worker."""
     if ray.is_initialized():
         ray.shutdown()
-    cluster = cluster_utils.Cluster(initialize_head=True, head_node_args={"num_cpus": 0})
+    cluster = cluster_utils.Cluster(
+        initialize_head=True, head_node_args={"num_cpus": 0}
+    )
     nodes = [cluster.add_node(num_cpus=2, resources={"slot": 1}) for _ in range(3)]
     ray.init(address=cluster.address, log_to_driver=False)
     cluster.wait_for_nodes()
@@ -73,21 +77,29 @@ def spot_cluster():
 def _to_ray(frame, blocks=4):
     """``frame`` as a Ray dataset of ``blocks`` pandas blocks."""
     bounds = np.linspace(0, len(frame), blocks + 1).astype(int)
-    return ray.data.from_pandas([frame.iloc[a:b] for a, b in zip(bounds[:-1], bounds[1:])])
+    return ray.data.from_pandas(
+        [frame.iloc[a:b] for a, b in zip(bounds[:-1], bounds[1:])]
+    )
 
 
 def _single_process(frame, num_workers, params):
     """``silvic.train`` on the workers' rows concatenated in rank order."""
-    parts = silvic_ray.ordered_partitions(frame, num_workers, label_column="label", group_column="qid")
+    parts = silvic_ray.ordered_partitions(
+        frame, num_workers, label_column="label", group_column="qid"
+    )
     rows = pd.concat(parts, ignore_index=True)
     assert len(rows) == len(frame)
-    train_set = silvic.Dataset(rows[FEATURES], label=rows["label"], group=group_sizes(rows["qid"]))
+    train_set = silvic.Dataset(
+        rows[FEATURES], label=rows["label"], group=group_sizes(rows["qid"])
+    )
     return silvic.train(params, train_set, ROUNDS, verbose_eval=False)
 
 
 def test_ordered_partitions_hold_whole_groups():
     frame = ranking_frame()
-    parts = silvic_ray.ordered_partitions(frame, 3, label_column="label", group_column="qid")
+    parts = silvic_ray.ordered_partitions(
+        frame, 3, label_column="label", group_column="qid"
+    )
     assert sum(len(p) for p in parts) == len(frame)
     seen = [set(p["qid"]) for p in parts]
     assert not (seen[0] & seen[1] or seen[0] & seen[2] or seen[1] & seen[2])
@@ -95,7 +107,10 @@ def test_ordered_partitions_hold_whole_groups():
         assert part["qid"].is_monotonic_increasing
     # The order depends on the rows, not on how they arrive.
     again = silvic_ray.ordered_partitions(
-        frame.sample(frac=1.0, random_state=9), 3, label_column="label", group_column="qid"
+        frame.sample(frac=1.0, random_state=9),
+        3,
+        label_column="label",
+        group_column="qid",
     )
     for a, b in zip(parts, again):
         pd.testing.assert_frame_equal(a, b)
@@ -138,7 +153,10 @@ def test_metal_workers(local_ray):
         verbose_eval=False,
         timeout_s=120,
     )
-    assert distributed.model_to_string() == _single_process(frame, 2, params).model_to_string()
+    assert (
+        distributed.model_to_string()
+        == _single_process(frame, 2, params).model_to_string()
+    )
 
 
 def _train(frame, **kwargs):
@@ -155,7 +173,11 @@ def _train(frame, **kwargs):
 
 
 def _silvic_actors(part):
-    return sorted(name for name in ray.util.list_named_actors() if name.startswith("silvic-") and part in name)
+    return sorted(
+        name
+        for name in ray.util.list_named_actors()
+        if name.startswith("silvic-") and part in name
+    )
 
 
 def _wait_for_checkpoint(iteration, timeout_s=60):
@@ -164,7 +186,10 @@ def _wait_for_checkpoint(iteration, timeout_s=60):
     while time.monotonic() < deadline:
         for name in _silvic_actors("-keeper"):
             with contextlib.suppress(Exception):
-                if ray.get(ray.get_actor(name).latest_iteration.remote(), timeout=5) >= iteration:
+                if (
+                    ray.get(ray.get_actor(name).latest_iteration.remote(), timeout=5)
+                    >= iteration
+                ):
                     return
         time.sleep(0.05)
     raise AssertionError(f"no checkpoint at iteration {iteration} within {timeout_s} s")
@@ -208,11 +233,15 @@ def _assert_no_actors_left():
     assert not _silvic_actors(""), "silvic actors outlived the job"
 
 
-def test_killed_worker_resumes_to_the_uninterrupted_model(local_ray, monkeypatch, capsys):
+def test_killed_worker_resumes_to_the_uninterrupted_model(
+    local_ray, monkeypatch, capsys
+):
     frame = ranking_frame()
     valid = {"valid": _to_ray(ranking_frame(num_queries=40, seed=11), blocks=2)}
     expected_evals = {}
-    expected = _train(frame, num_workers=2, valid_datasets=valid, evals_result=expected_evals)
+    expected = _train(
+        frame, num_workers=2, valid_datasets=valid, evals_result=expected_evals
+    )
     monkeypatch.setattr(silvic_ray, "_TEST_ITERATION_DELAY_S", FAULT_DELAY_S)
 
     def kill_rank_one():
@@ -221,7 +250,8 @@ def test_killed_worker_resumes_to_the_uninterrupted_model(local_ray, monkeypatch
 
     evals = {}
     resumed = _while_training(
-        lambda: _train(frame, num_workers=2, valid_datasets=valid, evals_result=evals), kill_rank_one
+        lambda: _train(frame, num_workers=2, valid_datasets=valid, evals_result=evals),
+        kill_rank_one,
     )
     output = capsys.readouterr().out
     assert WORKER_LOST in output
@@ -241,12 +271,18 @@ def test_failures_past_max_failures_raise(local_ray, monkeypatch, capsys):
             time.sleep(1.0)
             ray.kill(ray.get_actor(names[1]))
 
-    with pytest.raises((ray.exceptions.RayActorError, silvic.CollectiveError)) as caught:
+    with pytest.raises(
+        (ray.exceptions.RayActorError, silvic.CollectiveError)
+    ) as caught:
         _while_training(
-            lambda: _train(ranking_frame(), num_workers=2, num_boost_round=100_000, max_failures=1),
+            lambda: _train(
+                ranking_frame(), num_workers=2, num_boost_round=100_000, max_failures=1
+            ),
             kill_every_attempt,
         )
-    assert "silvic.ray.train gave up after 2 attempts" in getattr(caught.value, "__notes__", [])
+    assert "silvic.ray.train gave up after 2 attempts" in getattr(
+        caught.value, "__notes__", []
+    )
     assert capsys.readouterr().out.count(WORKER_LOST) == 1
     _assert_no_actors_left()
 
@@ -264,6 +300,61 @@ def test_config_errors_are_not_retried(local_ray, capsys):
     _assert_no_actors_left()
 
 
+@pytest.mark.parametrize("device_key", ["device_type", "device"])
+@pytest.mark.parametrize(
+    ("use_gpu", "resources"),
+    [
+        (True, None),
+        (True, {"CPU": 1, "GPU": 0}),
+        (False, {"CPU": 1, "GPU": 1}),
+        (False, {"GPU": 0.5, "neuron_cores": 1}),
+    ],
+)
+def test_neuron_rejects_gpu_requests_before_reading_data(
+    device_key, use_gpu, resources
+):
+    with pytest.raises(
+        ValueError, match="cannot be combined with use_gpu or GPU resources"
+    ):
+        silvic_ray.train(
+            {device_key: "neuron"},
+            None,
+            label_column="label",
+            use_gpu=use_gpu,
+            resources_per_worker=resources,
+        )
+
+
+@pytest.mark.parametrize(
+    "cores", [0, -1, 0.5, 1.5, float("nan"), float("inf"), True, False, "1", None]
+)
+def test_neuron_rejects_invalid_core_reservations_before_reading_data(cores):
+    with pytest.raises(
+        ValueError, match="neuron_cores must be a positive whole number"
+    ):
+        silvic_ray.train(
+            {"device_type": "neuron"},
+            None,
+            label_column="label",
+            resources_per_worker={"CPU": 1, "neuron_cores": cores},
+        )
+
+
+@pytest.mark.parametrize(
+    "params", [{}, {"device_type": "auto"}, {"device_type": "cpu"}, {"device": "cuda"}]
+)
+def test_neuron_resources_require_explicit_neuron_training_before_reading_data(params):
+    with pytest.raises(
+        ValueError, match='neuron_cores resources require explicit device_type="neuron"'
+    ):
+        silvic_ray.train(
+            params,
+            None,
+            label_column="label",
+            resources_per_worker={"CPU": 1, "neuron_cores": 1},
+        )
+
+
 SPOT = {"num_workers": 3, "resources_per_worker": {"CPU": 1, "slot": 1}}
 
 
@@ -276,7 +367,9 @@ def test_spot_node_loss_shrinks_to_min_workers(spot_cluster, monkeypatch, capsys
         cluster.remove_node(nodes[2])
 
     frame = ranking_frame()
-    booster = _while_training(lambda: _train(frame, **SPOT, min_workers=2, replacement_timeout_s=3), preempt)
+    booster = _while_training(
+        lambda: _train(frame, **SPOT, min_workers=2, replacement_timeout_s=3), preempt
+    )
     output = capsys.readouterr().out
     assert WORKER_LOST in output
     assert "continuing on 2 workers instead of 3" in output
@@ -288,7 +381,9 @@ def test_spot_node_loss_shrinks_to_min_workers(spot_cluster, monkeypatch, capsys
     np.testing.assert_array_equal(prediction, reference.predict(frame[FEATURES]))
 
 
-def test_spot_node_replacement_resumes_to_the_uninterrupted_model(spot_cluster, monkeypatch, capsys):
+def test_spot_node_replacement_resumes_to_the_uninterrupted_model(
+    spot_cluster, monkeypatch, capsys
+):
     cluster, nodes = spot_cluster
     frame = ranking_frame()
     expected = _train(frame, **SPOT)
@@ -299,7 +394,9 @@ def test_spot_node_replacement_resumes_to_the_uninterrupted_model(spot_cluster, 
         cluster.remove_node(nodes[2])
         cluster.add_node(num_cpus=2, resources={"slot": 1})
 
-    resumed = _while_training(lambda: _train(frame, **SPOT, replacement_timeout_s=60), preempt_and_replace)
+    resumed = _while_training(
+        lambda: _train(frame, **SPOT, replacement_timeout_s=60), preempt_and_replace
+    )
     output = capsys.readouterr().out
     assert WORKER_LOST in output
     assert "with 3 workers (attempt " in output

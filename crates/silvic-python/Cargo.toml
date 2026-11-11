@@ -25,6 +25,8 @@ silvic-gpu = { workspace = true, features = ["metal"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 silvic-gpu = { workspace = true, features = ["cuda"] }
+silvic-serve = { workspace = true, features = ["cuda"] }
+silvic-neuron = { workspace = true }
 
 [lints]
 workspace = true

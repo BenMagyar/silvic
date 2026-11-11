@@ -38,6 +38,8 @@ pub enum DeviceType {
     Gpu,
     Metal,
     Cuda,
+    /// Explicit AWS Neuron selection; never selected by `auto` or `gpu`.
+    Neuron,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -106,7 +108,7 @@ pub struct Params {
     pub quant_train_renew_leaf: bool,
     pub stochastic_rounding: bool,
     pub device_type: DeviceType,
-    /// `gpu_device_id`: the CUDA ordinal or Metal device index; `-1` is the default device.
+    /// `gpu_device_id`: CUDA ordinal, Metal device index or logical NeuronCore index; `-1` selects the default.
     pub gpu_device_id: i32,
     /// `0` uses every core.
     pub num_threads: usize,
@@ -583,8 +585,9 @@ fn parse_device(name: &str) -> Result<DeviceType> {
         "gpu" => Ok(DeviceType::Gpu),
         "metal" => Ok(DeviceType::Metal),
         "cuda" => Ok(DeviceType::Cuda),
+        "neuron" => Ok(DeviceType::Neuron),
         other => Err(SilvicError::config(format!(
-            "device_type `{other}`; expected auto, cpu, gpu, metal or cuda"
+            "device_type `{other}`; expected auto, cpu, gpu, metal, cuda or neuron"
         ))),
     }
 }
@@ -752,6 +755,31 @@ mod tests {
     fn alias_conflicts_fail() {
         let err = parse(r#"{"num_iterations": 10, "n_estimators": 20}"#).unwrap_err();
         assert_eq!(err.kind(), "config");
+    }
+
+    #[test]
+    fn explicit_devices_parse_without_changing_the_default() {
+        assert_eq!(parse("{}").expect("default params").device_type, DeviceType::Auto);
+        for (name, expected) in [
+            ("auto", DeviceType::Auto),
+            ("cpu", DeviceType::Cpu),
+            ("gpu", DeviceType::Gpu),
+            ("metal", DeviceType::Metal),
+            ("cuda", DeviceType::Cuda),
+            ("neuron", DeviceType::Neuron),
+            ("NEURON", DeviceType::Neuron),
+        ] {
+            let params = parse(&format!(r#"{{"device_type":"{name}","gpu_device_id":2}}"#)).expect("device");
+            assert_eq!(params.device_type, expected);
+            assert_eq!(params.gpu_device_id, 2);
+        }
+        assert_eq!(
+            parse(r#"{"device":"neuron"}"#).expect("device alias").device_type,
+            DeviceType::Neuron
+        );
+        for json in [r#"{"device_type":"unknown"}"#, r#"{"device_type":3}"#] {
+            assert_eq!(parse(json).unwrap_err().kind(), "config");
+        }
     }
 
     #[test]

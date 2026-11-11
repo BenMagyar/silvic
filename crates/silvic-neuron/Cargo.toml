@@ -1,0 +1,19 @@
+[package]
+name = "silvic-neuron"
+description = "AWS Neuron training and explicit float32 serving for silvic"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+silvic-core = { workspace = true }
+bytemuck = { workspace = true }
+rayon = { workspace = true }
+serde = { version = "1", features = ["derive"] }
+serde_json = { workspace = true }
+libloading = "0.9"
+sha2 = "0.10"
+
+[lints]
+workspace = true

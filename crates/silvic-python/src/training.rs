@@ -3,7 +3,7 @@
 //!
 //! `device_type` resolves as LightGBM resolves `device_type=gpu` to its one GPU build, extended to the devices
 //! silvic has: `auto` takes CUDA, then Metal, then the CPU; `gpu` takes CUDA, then Metal, and fails without either;
-//! `cpu`, `metal` and `cuda` fail when the device is absent instead of falling back silently.
+//! `cpu`, `metal`, `cuda` and `neuron` fail when the requested device is absent instead of falling back silently.
 
 use pyo3::prelude::*;
 use silvic_core::boosting::train_from;
@@ -27,6 +27,7 @@ enum Device {
     /// `None` is the default device.
     Metal(Option<usize>),
     Cuda(Option<usize>),
+    Neuron(Option<usize>),
 }
 
 #[cfg(target_os = "macos")]
@@ -49,7 +50,17 @@ fn cuda_available() -> bool {
     false
 }
 
-/// The devices this process can train on: `cpu`, plus `metal` and `cuda` when present.
+#[cfg(target_os = "linux")]
+fn neuron_available() -> bool {
+    silvic_neuron::is_available()
+}
+
+#[cfg(not(target_os = "linux"))]
+fn neuron_available() -> bool {
+    false
+}
+
+/// The devices this process can train on: CPU and any available Metal, CUDA or Neuron devices.
 #[pyfunction]
 pub fn available_devices() -> Vec<&'static str> {
     let mut devices = vec!["cpu"];
@@ -58,6 +69,9 @@ pub fn available_devices() -> Vec<&'static str> {
     }
     if cuda_available() {
         devices.push("cuda");
+    }
+    if neuron_available() {
+        devices.push("neuron");
     }
     devices
 }
@@ -86,6 +100,7 @@ fn choose_device(params: &Params) -> silvic_core::Result<Device> {
         )),
         DeviceType::Cuda if cuda_available() => Ok(Device::Cuda(index)),
         DeviceType::Cuda => Err(SilvicError::device("device_type=cuda but no CUDA device is available")),
+        DeviceType::Neuron => Ok(Device::Neuron(index)),
     }
 }
 
@@ -99,6 +114,7 @@ impl Device {
             Device::Cpu => Ok(Box::new(CpuBackend::borrowing(train, valid))),
             Device::Metal(index) => metal_backend(index),
             Device::Cuda(index) => cuda_backend(index),
+            Device::Neuron(index) => neuron_backend(index),
         }
     }
 }
@@ -121,6 +137,16 @@ fn cuda_backend<'a>(index: Option<usize>) -> silvic_core::Result<Box<dyn Backend
 #[cfg(not(target_os = "linux"))]
 fn cuda_backend<'a>(_index: Option<usize>) -> silvic_core::Result<Box<dyn Backend + 'a>> {
     Err(SilvicError::device("CUDA is only available on Linux"))
+}
+
+#[cfg(target_os = "linux")]
+fn neuron_backend<'a>(index: Option<usize>) -> silvic_core::Result<Box<dyn Backend + 'a>> {
+    Ok(Box::new(silvic_neuron::NeuronBackend::new(index)?))
+}
+
+#[cfg(not(target_os = "linux"))]
+fn neuron_backend<'a>(_index: Option<usize>) -> silvic_core::Result<Box<dyn Backend + 'a>> {
+    Err(SilvicError::device("Neuron training is only available on Linux"))
 }
 
 /// Writes `[silvic] [Info] <message>` to Python's `sys.stdout`, where LightGBM's Python package sends its log, so
