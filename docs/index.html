@@ -23,7 +23,7 @@
         <a href="changelog.html">Changelog</a>
       </nav>
     </header>
-    <p>Gradient boosting in Rust that trains the models <a href="https://lightgbm.readthedocs.io" target="_blank" rel="noreferrer">LightGBM</a> trains, on the CPU, Apple Metal or NVIDIA CUDA, in one process or across <a href="https://www.ray.io" target="_blank" rel="noreferrer">Ray</a> actors. It writes LightGBM 3.3.5 model text, so LightGBM, its SHAP values and lleaves serve its models unchanged. Its histograms are integer sums of quantized gradients: every run gives the same model, and Ray workers train the model one process would.</p>
+    <p>Gradient boosting in Rust that trains the models <a href="https://lightgbm.readthedocs.io" target="_blank" rel="noreferrer">LightGBM</a> trains, on the CPU, Apple Metal or NVIDIA CUDA, in one process or across <a href="https://www.ray.io" target="_blank" rel="noreferrer">Ray</a> actors that resume when a node is lost. It writes LightGBM 3.3.5 model text, so LightGBM, its SHAP values and lleaves serve its models unchanged, and it scores LightGBM’s models itself, in Python or as a <a href="docs/silvic-triton.html">Triton backend</a>, several times faster, with LightGBM’s predictions bit for bit. Its histograms are integer sums of quantized gradients: every run gives the same model, and Ray workers train the model one process would.</p>
 
     <h2>Against LightGBM</h2>
     <figure class="chart">
@@ -48,8 +48,28 @@
       <p class="in-the-margin">Lambdarank, 53 leaves, on synthetic learning-to-rank data with 136 features, on an Apple M4 Pro; LightGBM 4.7.0 on all 14 cores. Times include binning. Bars start from zero and use separate scales.</p>
     </figure>
 
+    <h2>Scoring</h2>
+    <figure class="chart">
+      <ul class="key"><li><span class="blaze us"></span>silvic.serve</li><li><span class="blaze them"></span>the engine named</li></ul>
+      <div class="rings" role="img" aria-label="Scoring 3,000 rows with 2,000 trees on one thread, median: silvic.serve 12.2 ms, lleaves 1.1.0 64.0 ms, treelite 104.1 ms, LightGBM 581.6 ms.">
+        <p class="reading"><b>lleaves 1.1.0</b> 3,000 rows through 2,000 trees in 12 ms. 5.2× faster.</p>
+        <span class="lane"><span class="reach us" style="--how-far: 19.06"></span><span class="reach them" style="--how-far: 100"></span></span>
+        <span class="girth"><b>12.2 ms</b><br>64.0 ms</span>
+
+        <p class="reading"><b>treelite 4.8</b> Compiled C, thresholds quantized. 8.5× faster.</p>
+        <span class="lane"><span class="reach us" style="--how-far: 11.72"></span><span class="reach them" style="--how-far: 100"></span></span>
+        <span class="girth"><b>12.2 ms</b><br>104.1 ms</span>
+
+        <p class="reading"><b>LightGBM 4.7</b> <code>predict</code> on one thread. 48× faster.</p>
+        <span class="lane"><span class="reach us" style="--how-far: 2.10"></span><span class="reach them" style="--how-far: 100"></span></span>
+        <span class="girth"><b>12.2 ms</b><br>581.6 ms</span>
+      </div>
+      <p class="in-the-margin">Median of 300 batches of 3,000 rows by 136 features, 2,000 lambdarank trees of 53 leaves, one thread on an Apple M4 Pro (NEON). Predictions equal LightGBM’s exactly; lleaves’ differ by up to 5e-14. On x86 silvic.serve runs AVX2, not yet timed.</p>
+    </figure>
+
     <h2>Use it</h2>
-    <pre tabindex="0"><code><span class="word">maturin develop</span> --release</code></pre>
+    <pre tabindex="0"><code><span class="word">pip install</span> silvic
+<span class="word">pip install</span> <span class="said">"silvic[ray]"</span></code></pre>
     <pre tabindex="0"><code><span class="word">import</span> silvic
 
 train_set = silvic.Dataset(X, label=y, group=query_sizes)
@@ -60,6 +80,10 @@ booster.save_model(<span class="said">"model.txt"</span>)</code></pre>
 booster = silvic.ray.train(params, ray.data.read_parquet(<span class="said">"s3://bucket/train/"</span>),
                            label_column=<span class="said">"label"</span>, group_column=<span class="said">"query_id"</span>,
                            num_workers=<span class="said">5</span>, use_gpu=<span class="word">True</span>)</code></pre>
+    <pre tabindex="0"><code><span class="word">import</span> silvic.serve
+
+predictor = silvic.serve.Predictor(<span class="said">"model.txt"</span>)  # any LightGBM 3.x or 4.x model
+scores = predictor.predict(candidates, num_threads=<span class="said">1</span>)</code></pre>
   </main>
   <script src="mark.js"></script>
 </body>

@@ -17,7 +17,9 @@
           <li><code>silvic-core</code>: LightGBM 3.3.5’s parameters, binning, objectives (<code>regression</code>, <code>binary</code>, <code>lambdarank</code>) and metrics; leaf-wise trees on quantized integer histograms, bit-reproducible on any number of ranks; LightGBM model text, read and written byte for byte; the CPU backend.</li>
           <li><code>silvic-gpu</code>: Metal and CUDA backends from one kernel source, one device wait per split. Metal matches the CPU backend bit for bit on quantized L2; CUDA compiles but has not run on NVIDIA hardware.</li>
           <li><code>silvic-net</code>: TCP ring allreduce and allgather with a token handshake, a fixed fold order, and failures that travel around the ring instead of hanging.</li>
-          <li><code>silvic-python</code>: the <code>silvic</code> package with LightGBM’s Python API and scikit-learn estimators, and <code>silvic.ray.train</code>, whose model equals single-process training on the same rows.</li>
+          <li><code>silvic-python</code>: the <code>silvic</code> package with LightGBM’s Python API, <code>init_model</code> and scikit-learn estimators, and <code>silvic.ray.train</code>, whose model equals single-process training on the same rows and which resumes from checkpoints when workers or spot nodes are lost.</li>
+          <li><code>silvic-serve</code>: scoring of LightGBM 3.x and 4.x models with LightGBM’s predictions bit for bit, on SIMD byte lanes: 5.2× faster than lleaves 1.1.0 on one core, and <code>silvic.serve.Model</code> where <code>lleaves.Model</code> was.</li>
+          <li><code>silvic-triton</code>: a Triton Inference Server backend serving LightGBM models with <code>silvic-serve</code>: FP64 outputs are LightGBM’s predictions bit for bit, FIL’s configs serve with only the backend name changed, and small requests batched together are scored as one matrix. Run on tritonserver 2.51.0 on aarch64 Linux; not yet on x86-64 or a GPU host.</li>
         </ul>
       ]]></description>
     </item>

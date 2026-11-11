@@ -27,15 +27,15 @@
     </header>
 
     <h1><code>silvic-python</code></h1>
-    <p>The <code>silvic</code> Python package: LightGBM’s Python API over <a href="silvic-core.html"><code>silvic-core</code></a> and the Metal and CUDA backends of <a href="silvic-gpu.html"><code>silvic-gpu</code></a>, and <code>silvic.ray</code>, which trains one model across Ray actors over the TCP ring of <a href="silvic-net.html"><code>silvic-net</code></a>. A CPython 3.10+ extension (abi3), built by maturin. Training runs without the GIL.</p>
-    <pre tabindex="0"><code><span class="word">maturin develop</span> --release</code></pre>
+    <p>The <code>silvic</code> Python package: LightGBM’s Python API over <a href="silvic-core.html"><code>silvic-core</code></a> and the Metal and CUDA backends of <a href="silvic-gpu.html"><code>silvic-gpu</code></a>, and <code>silvic.ray</code>, which trains one model across Ray actors over the TCP ring of <a href="silvic-net.html"><code>silvic-net</code></a>. A CPython 3.10+ extension (abi3). Training runs without the GIL. Ray, pandas and scikit-learn are optional: <code>silvic[ray]</code>, <code>silvic[pandas]</code>, <code>silvic[sklearn]</code>.</p>
+    <pre tabindex="0"><code><span class="word">pip install</span> silvic</code></pre>
 
     <h2>Public API</h2>
     <dl class="manifest">
       <dt><code>Dataset(data, label=None, reference=None, weight=None, group=None, feature_name="auto", categorical_feature="auto", params=None)</code></dt>
       <dd>Training or validation rows from numpy or pandas, binned on first use. <code>group</code> holds query sizes, rows sorted by query. pandas <code>category</code> columns become categorical features, and the model stores their levels as LightGBM’s package does. <code>init_score</code> is rejected.</dd>
-      <dt><code>train(params, train_set, num_boost_round=100, valid_sets=None, valid_names=None, callbacks=None)</code></dt>
-      <dd>Trains and returns a <code>Booster</code>. A number of iterations in <code>params</code>, under any alias, wins over <code>num_boost_round</code>, as in LightGBM. <code>evals_result</code> and <code>verbose_eval</code> work as in LightGBM 3.3.5.</dd>
+      <dt><code>train(params, train_set, num_boost_round=100, valid_sets=None, valid_names=None, init_model=None, callbacks=None)</code></dt>
+      <dd>Trains and returns a <code>Booster</code>. A number of iterations in <code>params</code>, under any alias, wins over <code>num_boost_round</code>, as in LightGBM. <code>evals_result</code> and <code>verbose_eval</code> work as in LightGBM 3.3.5. <code>init_model</code>, a <code>Booster</code>, a path or model text, keeps its trees and adds <code>num_boost_round</code> more; on the rows it was trained on, the result equals training them all in one go.</dd>
       <dt><code>Booster(model_file=None, model_str=None)</code></dt>
       <dd>A trained model, from <code>train</code> or from a LightGBM 3.x or 4.x model of a supported objective. Pickles.</dd>
       <dt><code>booster.predict(data, raw_score=False, num_iteration=None)</code></dt>
@@ -65,7 +65,7 @@
     </dl>
 
     <h2>Errors</h2>
-    <p><code>SilvicError</code> is the base class. <code>ConfigError</code> and <code>DataError</code> are also <code>ValueError</code>s, as LightGBM raises for bad input; <code>DeviceError</code>, <code>CollectiveError</code>, <code>ModelError</code> and <code>UnsupportedError</code> are also <code>RuntimeError</code>s. An unknown parameter is a <code>ValueError</code>, as are <code>fobj</code>, <code>feval</code>, <code>init_model</code>, <code>learning_rates</code> and early stopping, which silvic does not do. An exception raised in a callback stops training and is raised from <code>train</code>; Ctrl-C raises <code>KeyboardInterrupt</code>.</p>
+    <p><code>SilvicError</code> is the base class. <code>ConfigError</code> and <code>DataError</code> are also <code>ValueError</code>s, as LightGBM raises for bad input; <code>DeviceError</code>, <code>CollectiveError</code>, <code>ModelError</code> and <code>UnsupportedError</code> are also <code>RuntimeError</code>s. An unknown parameter is a <code>ValueError</code>, as are <code>fobj</code>, <code>feval</code>, <code>learning_rates</code> and early stopping, which silvic does not do. An exception raised in a callback stops training and is raised from <code>train</code>; Ctrl-C raises <code>KeyboardInterrupt</code>.</p>
 
     <h2><code>silvic.ray</code></h2>
     <pre tabindex="0"><code><span class="word">import</span> ray
@@ -85,11 +85,20 @@ booster = silvic.ray.train(
       <dd>The placement group’s strategy.</dd>
       <dt><code>timeout_s</code> <span class="default">1800</span></dt>
       <dd>Bounds placement, the TCP rendezvous, and how long a collective waits for a silent peer.</dd>
+      <dt><code>max_failures</code> <span class="default">3</span></dt>
+      <dd>How many times a lost worker is replaced and training resumed before the run gives up.</dd>
+      <dt><code>checkpoint_period</code> <span class="default">25</span></dt>
+      <dd>Iterations between the checkpoints rank 0 sends the driver; a resume repeats at most this many.</dd>
+      <dt><code>min_workers</code> <span class="default">num_workers</span></dt>
+      <dd>The fewest workers a resume may continue on when a lost node is not replaced.</dd>
+      <dt><code>replacement_timeout_s</code> <span class="default">300</span></dt>
+      <dd>How long a resume waits for every worker’s bundle to be placed, at each worker count it tries.</dd>
       <dt><code>ordered_partitions(data, num_workers, *, label_column, ...)</code></dt>
       <dd>Each worker’s rows in training order, to repeat a distributed run in one process.</dd>
     </dl>
     <p>Rows go to rank <code>hash(group key) % num_workers</code>, so each actor holds whole queries. One task per input block splits it into a piece per worker, and each actor fetches only its own pieces: the dataset is read once and every row moves once. Each actor then sorts its rows by group key, features, label and weight, an order that depends only on the data and <code>num_workers</code>. The model equals <code>silvic.train</code> on the workers’ rows in rank order, when <code>bin_construct_sample_cnt</code> covers every row.</p>
-    <p>If an actor fails, the driver kills the others and raises the error that caused it: an actor’s own exception before a dead actor, and either before the collective errors its peers see.</p>
+    <p>A lost worker, a reclaimed spot node or a lost object does not end the run. The driver kills the actors, places the group again, and every rank re-loads its rows and trains the remaining trees from the last checkpoint. With the same number of workers, rows and bins are the same, so the model equals an uninterrupted run, byte for byte. When the group can’t be placed in <code>replacement_timeout_s</code> and <code>min_workers</code> is lower, it continues on one worker fewer at a time, repartitioned: a valid model, but no longer the uninterrupted one. It never scales back up. Every resume prints a warning naming the node, the error and the iteration it resumes from.</p>
+    <p>Other failures are raised at once: an actor’s own exception before a dead actor, and either before the collective errors its peers see. After <code>max_failures</code> resumes, the root error is raised.</p>
 
     <nav class="onward" aria-label="Crates">
       <a class="next" href="silvic-core.html"><code>silvic-core</code> →</a>

@@ -47,6 +47,10 @@ Tests:
 | --- | --- | --- |
 | `silvic-core` | `cargo test -p silvic-core` | `.venv` and `.venv-lgb3` for the LightGBM/lleaves load check, skipped without them |
 | `silvic-net` | `cargo test -p silvic-net` | |
+| `silvic-serve` | `cargo test -p silvic-serve` | |
+| `silvic-serve` | `ROSETTA_ADVERTISE_AVX=1 SILVIC_SERVE_EXPECT_KERNELS=portable,avx2 cargo test -p silvic-serve --target x86_64-apple-darwin` | Apple silicon with Rosetta 2 and the `x86_64-apple-darwin` target: runs the AVX2 kernel |
+| `silvic-triton` | `cargo test -p silvic-triton` | |
+| `silvic-triton` | `tests/triton/run.sh` | Docker (about 2 GB of images, and the `silvic-triton-target` and `silvic-triton-cargo` volumes) and `.venv`: builds the backend for Linux and runs `tests/triton/test_backend.py` against tritonserver 2.51.0 |
 | `silvic-gpu` | `cargo test -p silvic-gpu --features metal` | a Metal device, skipped without one; clang with CUDA support for `tests/cuda_syntax.rs` |
 | `silvic-gpu` | `cargo test -p silvic-gpu --features cuda` | nothing beyond the syntax test runs CUDA yet |
 | Python | `.venv/bin/maturin develop --release && .venv/bin/pytest tests/python` | `.venv`; the Ray tests start a local Ray cluster |
@@ -67,15 +71,24 @@ Criterion benches under each crate's `benches/`, run with `cargo bench -p <crate
 | --- | --- | --- |
 | `silvic-gpu` | `histogram` | Metal against `CpuBackend` histograms, 10M rows x 136 features, root and a 10% leaf (`--features metal`) |
 | `silvic-net` | `allreduce` | Ring allreduce latency over 127.0.0.1, world sizes 2 to 8, 3 elements and 300 KB |
+| `silvic-serve` | `predict` | Single-thread scoring of 3000 rows with a random 2000-tree, 53-leaf forest: the reference walk and every kernel |
 
 End to end, `bench/run.py` trains the same lambdarank model with LightGBM and silvic on the same rows and reports wall
 time and NDCG@12/@50; `bench/gen_ltr.py` documents the data. `bench/check_compat.py` trains a model with silvic and
 checks it in LightGBM 3.3.5 (predictions and `pred_contrib` SHAP values) and lleaves 1.1.0.
+`bench/serve.py` times single-thread scoring of 3000-row batches with a 2000-tree lambdarank model (trained once by
+LightGBM on `gen_ltr.py` rows) in LightGBM, lleaves, treelite/tl2cgen and every `silvic.serve` kernel, and fails unless
+`silvic.serve` equals LightGBM bit for bit; run the lleaves rows from `.venv-lgb3` (lleaves 1.1.0), whose LLVM build
+the `.venv` lleaves cannot use. `bench/triton.py` times 3000-row gRPC requests to a tritonserver serving that model
+with the silvic backend (or FIL's, `--backend fil`): client p50/p99 and Triton's per-request compute time.
 
 ```sh
 .venv/bin/python bench/run.py --rows 2000000 --iterations 500 --engines silvic-metal,silvic-cpu,lightgbm
 .venv/bin/python bench/check_compat.py train --rows 2000000 --out /tmp/silvic-compat
 .venv-lgb3/bin/python bench/check_compat.py check --out /tmp/silvic-compat
+.venv/bin/python bench/serve.py --engines lightgbm,treelite,treelite-quantize,silvic-portable,silvic-neon
+.venv-lgb3/bin/python bench/serve.py --engines lightgbm,lleaves,lleaves-noinline
+tests/triton/run.sh bench --rows 1:1:1,4:4:1,1:1:4
 ```
 
 ## Fixtures

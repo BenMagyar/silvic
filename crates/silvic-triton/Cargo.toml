@@ -1,0 +1,25 @@
+[package]
+name = "silvic-triton"
+description = "A Triton Inference Server backend that serves LightGBM models with silvic-serve, bit for bit"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+readme = "README.md"
+keywords = ["lightgbm", "triton", "inference", "gbdt", "backend"]
+
+[lib]
+# Triton loads `<backend-directory>/silvic/libtriton_silvic.so` for `backend: "silvic"`.
+name = "triton_silvic"
+crate-type = ["cdylib"]
+
+[dependencies]
+silvic-core = { workspace = true }
+silvic-serve = { workspace = true }
+bytemuck = { workspace = true }
+libc = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[lints]
+workspace = true

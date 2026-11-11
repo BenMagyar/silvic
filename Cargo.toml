@@ -22,6 +22,7 @@ codegen-units = 1
 silvic-core = { path = "crates/silvic-core" }
 silvic-gpu = { path = "crates/silvic-gpu" }
 silvic-net = { path = "crates/silvic-net" }
+silvic-serve = { path = "crates/silvic-serve" }
 thiserror = "2"
 rayon = "1.12"
 bytemuck = { version = "1.25", features = ["derive"] }

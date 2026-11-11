@@ -14,11 +14,20 @@ trained by N Ray workers is the model trained on the same rows in one process.
   boosting loop, model text and prediction, and the CPU backend.
 - [`silvic-gpu`](crates/silvic-gpu): the Metal and CUDA backends, from one kernel source compiled at run time.
 - [`silvic-net`](crates/silvic-net): TCP ring collectives for distributed training.
+- [`silvic-serve`](crates/silvic-serve): batch scoring of LightGBM models, equal to LightGBM's predictions bit for
+  bit, with QuickScorer leaf bitvectors on NEON, AVX2 or AVX-512 (`silvic.serve` in Python, with an lleaves drop-in).
+- [`silvic-triton`](crates/silvic-triton): a Triton Inference Server backend serving LightGBM models with
+  `silvic-serve`, a drop-in for the FIL backend's LightGBM configs.
 - [`silvic-python`](crates/silvic-python): the `silvic` Python package (LightGBM's Python API) and `silvic.ray`.
 
 [`docs/`](docs) is the documentation site: an overview, a page per crate and the changelog.
 
 ## Use it
+
+```sh
+pip install silvic
+pip install "silvic[ray]"   # silvic.ray: training across Ray actors
+```
 
 ```python
 import silvic
@@ -53,7 +62,13 @@ booster = silvic.ray.train(
 
 Rows are hash-split by query group in one streaming pass over the dataset, so each actor holds whole queries in an
 order that depends only on the data and `num_workers`. Actors run in a placement group and reduce histograms over a
-TCP ring; if one fails, the others are killed and its error is raised.
+TCP ring. Rank 0 checkpoints the model every `checkpoint_period` (25) iterations; when a worker or a spot node is
+lost, the driver places the group again and every rank resumes from the checkpoint, up to `max_failures` (3) times.
+With the same worker count the model equals an uninterrupted run byte for byte; `min_workers` lets it continue on
+fewer when a node is not replaced. Any other error is raised at once.
+
+`silvic.train(init_model=...)` continues a model as in LightGBM; on the rows it was trained on, the result equals
+training every tree in one go.
 
 ## Performance
 

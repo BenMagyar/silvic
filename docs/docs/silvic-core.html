@@ -42,7 +42,9 @@ std::fs::write(<span class="said">"model.txt"</span>, model.to_lightgbm_string()
       <dt><code>BinnedDataset::construct_with_reference(input, reference, collective)</code></dt>
       <dd>Bins a validation set with the training set’s mappers.</dd>
       <dt><code>train(params, train_set, valid, backend, collective, on_iteration)</code></dt>
-      <dd>Grows <code>num_iterations</code> trees and returns the <code>Model</code>; every rank returns the same one. <code>on_iteration</code> sees each iteration’s evaluations, and an error from it stops training.</dd>
+      <dd>Grows <code>num_iterations</code> trees and returns the <code>Model</code>; every rank returns the same one. <code>on_iteration</code> sees each iteration’s evaluations, and <code>report.model()</code> the model so far, to checkpoint; an error from it stops training.</dd>
+      <dt><code>train_from(params, init_model, train_set, valid, backend, collective, on_iteration)</code></dt>
+      <dd>Adds <code>num_iterations</code> trees to <code>init_model</code>. Its trees are replayed onto the scores in f32 as training added them, and sampling is keyed by the absolute iteration, so resuming a checkpoint on the same rows and bins gives the uninterrupted model, byte for byte. A model binned differently, LightGBM’s included, continues approximately.</dd>
       <dt><code>model.to_lightgbm_string()</code>, <code>Model::from_lightgbm_string(text)</code></dt>
       <dd>LightGBM 3.3.5 model text, written byte for byte as LightGBM writes it; LightGBM 3.x and 4.x models read back to the same bytes.</dd>
       <dt><code>model.predict(matrix, raw_score, num_trees)</code></dt>

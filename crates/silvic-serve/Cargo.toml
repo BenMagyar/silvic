@@ -1,0 +1,28 @@
+[package]
+name = "silvic-serve"
+description = "Exact, fast batch scoring of LightGBM models: QuickScorer leaf bitvectors over SIMD row blocks"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+readme = "README.md"
+keywords = ["lightgbm", "gbdt", "inference", "quickscorer", "simd"]
+
+[dependencies]
+silvic-core = { workspace = true }
+rayon = { workspace = true }
+
+[dev-dependencies]
+criterion = { workspace = true }
+serde_json = { workspace = true }
+
+[lib]
+# `cargo bench` arguments are criterion's: the lib's libtest bench harness, with no benches, would reject them.
+bench = false
+
+[[bench]]
+name = "predict"
+harness = false
+
+[lints]
+workspace = true

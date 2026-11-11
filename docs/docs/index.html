@@ -27,15 +27,18 @@
     </header>
 
     <h1>Docs</h1>
-    <p>silvic, LightGBM-compatible gradient boosting, is four Rust crates, one of which builds the <code>silvic</code> Python package, version 0.1.0 and not yet released (<a href="../changelog.html">changelog</a>). Build the package from a checkout into a Python 3.10 or newer environment:</p>
-    <pre tabindex="0"><code><span class="word">maturin develop</span> --release</code></pre>
+    <p>silvic, LightGBM-compatible gradient boosting, is six Rust crates, one of which builds the <code>silvic</code> Python package, version 0.1.0 (<a href="../changelog.html">changelog</a>). Install it into Python 3.10 or newer; the <code>ray</code> extra adds what <code>silvic.ray</code> needs:</p>
+    <pre tabindex="0"><code><span class="word">pip install</span> silvic
+<span class="word">pip install</span> <span class="said">"silvic[ray]"</span></code></pre>
     <p>Then train as with LightGBM, with the same parameter names:</p>
     <pre tabindex="0"><code><span class="word">import</span> silvic
+<span class="word">import</span> silvic.serve
 
 params = {<span class="said">"objective"</span>: <span class="said">"lambdarank"</span>, <span class="said">"num_leaves"</span>: <span class="said">53</span>, <span class="said">"device_type"</span>: <span class="said">"auto"</span>}
 train_set = silvic.Dataset(X, label=y, group=query_sizes, categorical_feature=[<span class="said">131</span>, <span class="said">132</span>])
 booster = silvic.train(params, train_set, num_boost_round=<span class="said">1500</span>)
-scores = booster.predict(X_test)</code></pre>
+scores = booster.predict(X_test)
+fast_scores = silvic.serve.Predictor(booster).predict(X_test)  # the same scores, faster</code></pre>
     <p>Rust 1.94.1 or newer builds it. Metal runs on Apple silicon; CUDA needs an NVIDIA driver and NVRTC from CUDA 12, and has not yet run on NVIDIA hardware.</p>
 
     <h2>Package and crates</h2>
@@ -48,6 +51,10 @@ scores = booster.predict(X_test)</code></pre>
       <dd>The Metal and CUDA backends, from one kernel source compiled at run time.</dd>
       <dt><a href="silvic-net.html"><code>silvic-net</code></a></dt>
       <dd>TCP ring collectives for distributed training.</dd>
+      <dt><a href="silvic-serve.html"><code>silvic-serve</code></a></dt>
+      <dd>Scoring of LightGBM models, bit for bit LightGBM’s predictions, on SIMD byte lanes: 5× faster than lleaves.</dd>
+      <dt><a href="silvic-triton.html"><code>silvic-triton</code></a></dt>
+      <dd>A Triton Inference Server backend serving LightGBM models with <code>silvic-serve</code>, where the FIL backend’s configs serve unchanged but for its name.</dd>
     </dl>
   </main>
   <script src="../mark.js"></script>

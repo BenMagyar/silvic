@@ -743,6 +743,29 @@ dependencies = [
  "silvic-core",
  "silvic-gpu",
  "silvic-net",
+ "silvic-serve",
+]
+
+[[package]]
+name = "silvic-serve"
+version = "0.1.0"
+dependencies = [
+ "criterion",
+ "rayon",
+ "serde_json",
+ "silvic-core",
+]
+
+[[package]]
+name = "silvic-triton"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "libc",
+ "serde_json",
+ "silvic-core",
+ "silvic-serve",
+ "thiserror",
 ]
 
 [[package]]

@@ -87,6 +87,13 @@ impl Model {
     }
 }
 
+impl Tree {
+    /// The leaf `row` reaches, as `Model::predict_raw_row` walks it: `row` holds raw feature values (NaN missing).
+    pub fn leaf_index(&self, row: &[f64]) -> usize {
+        leaf_index(self, row)
+    }
+}
+
 /// `Tree::Predict`'s leaf: a one-leaf tree has no nodes to walk. Like `GetLeaf`, a tree without categorical splits
 /// takes every node as numerical.
 fn leaf_index(tree: &Tree, row: &[f64]) -> usize {

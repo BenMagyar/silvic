@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>silvic-triton · silvic</title>
+  <meta name="description" content="A Triton Inference Server backend that serves LightGBM models with silvic-serve.">
+  <link rel="icon" href="../favicon.ico" sizes="32x32">
+  <link rel="icon" href="../favicon.png" type="image/png" sizes="96x96">
+  <link rel="apple-touch-icon" href="../apple-touch-icon.png">
+  <link rel="alternate" type="application/rss+xml" title="silvic changelog" href="../feed.xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600&amp;family=JetBrains+Mono&amp;display=swap">
+  <link rel="stylesheet" href="../styles.css">
+  <link rel="stylesheet" href="../docs.css">
+</head>
+<body>
+  <main>
+    <header class="masthead deeper">
+      <a class="rooted" href="../"><canvas class="growth" width="32" height="32" aria-hidden="true"></canvas>silvic</a>
+      <nav class="trail" aria-label="silvic">
+        <a class="homeward" href="../">Overview</a>
+        <a href="./" aria-current="true">Docs</a>
+        <a href="../changelog.html">Changelog</a>
+      </nav>
+    </header>
+
+    <h1><code>silvic-triton</code></h1>
+    <p>A native <a href="https://github.com/triton-inference-server/server" target="_blank" rel="noreferrer">Triton Inference Server</a> backend, <code>silvic</code>, that serves LightGBM <code>model.txt</code> models with <a href="silvic-serve.html"><code>silvic-serve</code></a>. FP64 outputs are LightGBM’s predictions bit for bit. It reads the FIL backend’s LightGBM configs, so a FIL model directory serves with <code>backend: "fil"</code> changed to <code>backend: "silvic"</code>. It needs backend API 1.10 (Triton 22.09) or newer, and has run on tritonserver 2.51.0 (NGC 24.10).</p>
+    <pre tabindex="0"><code>models/ranker/config.pbtxt
+models/ranker/1/model.txt</code></pre>
+    <pre tabindex="0"><code><span class="word">backend</span>: <span class="said">"silvic"</span>
+<span class="word">max_batch_size</span>: <span class="said">4096</span>
+<span class="word">input</span> [{ name: <span class="said">"input__0"</span> data_type: TYPE_FP32 dims: [ <span class="said">136</span> ] }]
+<span class="word">output</span> [{ name: <span class="said">"output__0"</span> data_type: TYPE_FP64 dims: [ <span class="said">1</span> ] }]
+<span class="word">instance_group</span> [{ kind: KIND_CPU count: <span class="said">2</span> }]
+<span class="word">dynamic_batching</span> { max_queue_delay_microseconds: <span class="said">500</span> }</code></pre>
+
+    <h2>Parameters</h2>
+    <p>Triton’s string parameters. Any other key fails the load and names it, except FIL’s tuning parameters, which are accepted and do nothing.</p>
+    <dl class="manifest">
+      <dt><code>model_file</code> <span class="default">model.txt</span></dt>
+      <dd>The model file in the version directory.</dd>
+      <dt><code>raw_score</code> <span class="default">false</span></dt>
+      <dd>Margins instead of the objective’s transform, the sigmoid for <code>binary</code>, as <code>Booster.predict</code>.</dd>
+      <dt><code>num_iteration</code> <span class="default">0</span></dt>
+      <dd>Score with the first N trees; 0 or less, every tree.</dd>
+      <dt><code>kernel</code> <span class="default">detected</span></dt>
+      <dd><code>portable</code>, <code>neon</code>, <code>avx2</code> or <code>avx512</code>; one the CPU does not run fails the load.</dd>
+      <dt><code>num_threads</code> <span class="default">1</span></dt>
+      <dd>Threads per scored matrix; 0 is every core. For parallelism across requests, prefer more instances.</dd>
+    </dl>
+
+    <h2>Inputs and outputs</h2>
+    <p>One input, <code>TYPE_FP32</code> or <code>TYPE_FP64</code>, as wide as the model has features; with <code>max_batch_size</code> above 0 its dims are <code>[num_features]</code>, otherwise <code>[-1, num_features]</code>. One output: <code>TYPE_FP64</code> holds LightGBM’s predictions exactly, <code>TYPE_FP32</code> their cast, as FIL clients expect; dims <code>[1]</code> with batching, <code>[-1]</code> without. With Triton’s auto-complete, a config of only <code>backend</code> and <code>max_batch_size</code> gets FIL’s names, <code>input__0</code> in FP32 and <code>output__0</code> in FP64; a config that gives them is checked against the model.</p>
+    <p>A contiguous CPU input is scored where Triton holds it. Requests of fewer than 256 rows that dynamic batching delivers together are scored as one matrix, so a 1-row request doesn’t pay a 64-row block alone. A bad request gets an error response and leaves the others, the instance and the server alone. Instances run on the CPU; <code>KIND_GPU</code> is a load error. Triton’s statistics and metrics get every request’s and execution’s timestamps.</p>
+
+    <h2>Build and run</h2>
+    <pre tabindex="0"><code><span class="word">docker build</span> -f deploy/triton/Dockerfile -t tritonserver-silvic .
+<span class="word">docker run</span> --rm -p <span class="said">8001:8001</span> -v <span class="said">"$PWD/models":/models</span> tritonserver-silvic \
+    tritonserver --model-repository=/models</code></pre>
+    <p>The image is NVIDIA’s tritonserver with <code>libtriton_silvic.so</code> in <code>/opt/tritonserver/backends/silvic/</code>. For another tritonserver, build it on Linux with <code>cargo build --release -p silvic-triton</code> and put it at <code>&lt;backend-directory&gt;/silvic/libtriton_silvic.so</code>.</p>
+
+    <h2>Against FIL</h2>
+    <p>3,000-row FP32 requests over gRPC, one instance and one client, in a 4-vCPU aarch64 Linux VM on an Apple M4 Pro, server and client sharing it. Not production numbers.</p>
+    <dl class="manifest">
+      <dt>silvic, 1 thread per request</dt>
+      <dd>13.2 ms at the median, 12.3 ms of it scoring.</dd>
+      <dt>silvic, 4 threads per request</dt>
+      <dd>4.0 ms at the median.</dd>
+      <dt>FIL on the CPU, OpenMP on every vCPU</dt>
+      <dd>243 ms at the median; its outputs, computed in f32, differ from LightGBM’s by up to 2.4e-5.</dd>
+    </dl>
+    <p>FIL is built for NVIDIA GPUs; its GPU mode, and this backend on x86, have not been measured yet.</p>
+
+    <nav class="onward" aria-label="Crates">
+      <a href="silvic-serve.html">← <code>silvic-serve</code></a>
+    </nav>
+  </main>
+  <script src="../mark.js"></script>
+</body>
+</html>

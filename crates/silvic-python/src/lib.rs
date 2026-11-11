@@ -6,6 +6,7 @@ mod booster;
 mod collective;
 mod dataset;
 mod error;
+mod serve;
 mod training;
 
 use pyo3::prelude::*;
@@ -22,5 +23,7 @@ fn _silvic(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(training::validate_params, module)?)?;
     module.add_function(wrap_pyfunction!(training::available_devices, module)?)?;
     module.add_function(wrap_pyfunction!(collective::connect, module)?)?;
+    module.add_class::<serve::Predictor>()?;
+    module.add_function(wrap_pyfunction!(serve::available_kernels, module)?)?;
     Ok(())
 }

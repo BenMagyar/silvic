@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>silvic-serve · silvic</title>
+  <meta name="description" content="Scoring of LightGBM models, bit for bit LightGBM's predictions, on SIMD byte lanes.">
+  <link rel="icon" href="../favicon.ico" sizes="32x32">
+  <link rel="icon" href="../favicon.png" type="image/png" sizes="96x96">
+  <link rel="apple-touch-icon" href="../apple-touch-icon.png">
+  <link rel="alternate" type="application/rss+xml" title="silvic changelog" href="../feed.xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600&amp;family=JetBrains+Mono&amp;display=swap">
+  <link rel="stylesheet" href="../styles.css">
+  <link rel="stylesheet" href="../docs.css">
+</head>
+<body>
+  <main>
+    <header class="masthead deeper">
+      <a class="rooted" href="../"><canvas class="growth" width="32" height="32" aria-hidden="true"></canvas>silvic</a>
+      <nav class="trail" aria-label="silvic">
+        <a class="homeward" href="../">Overview</a>
+        <a href="./" aria-current="true">Docs</a>
+        <a href="../changelog.html">Changelog</a>
+      </nav>
+    </header>
+
+    <h1><code>silvic-serve</code></h1>
+    <p>Scores LightGBM models, <code>model.txt</code> from LightGBM 3.3.5 or 4.x or from silvic, with LightGBM’s predictions bit for bit. A 3,000-row batch through 2,000 trees of 53 leaves takes 12.2 ms on one Apple M4 Pro core, against 64.0 ms for lleaves 1.1.0 and 581.6 ms for LightGBM. Python reaches it as <code>silvic.serve</code>, in the <code>silvic</code> package.</p>
+    <pre tabindex="0"><code><span class="word">import</span> silvic.serve
+
+predictor = silvic.serve.Predictor(<span class="said">"model.txt"</span>)
+scores = predictor.predict(candidates, num_threads=<span class="said">1</span>)
+
+model = silvic.serve.Model(model_file=<span class="said">"model.txt"</span>)  # where lleaves.Model was
+model.compile()
+scores = model.predict(candidates, n_jobs=<span class="said">1</span>)</code></pre>
+
+    <h2>Public API</h2>
+    <dl class="manifest">
+      <dt><code>silvic.serve.Predictor(model, kernel=None)</code></dt>
+      <dd>Compiles a <code>silvic.Booster</code>, a <code>lightgbm.Booster</code>, model text or a model file, in milliseconds.</dd>
+      <dt><code>predictor.predict(data, raw_score=False, num_iteration=None, num_threads=1)</code></dt>
+      <dd>One score per row of numpy (f32 or f64, C or Fortran order) or pandas, with categories mapped as at training. One thread scores on the calling thread, 0 on every core. Releases the GIL.</dd>
+      <dt><code>silvic.serve.Model(model_file=None, model_str=None)</code></dt>
+      <dd>lleaves’ <code>Model</code>: <code>compile()</code> records <code>raw_score</code> and ignores lleaves’ tuning options, and <code>predict(data, n_jobs=None)</code> uses every core unless told otherwise, as lleaves does.</dd>
+      <dt><code>Predictor::new(&amp;model)</code>, <code>predictor.predict(&amp;rows, raw_score, num_trees, num_threads)</code></dt>
+      <dd>The same from Rust, on a <code>silvic_core::Model</code> and a <code>DenseMatrix</code>; <code>predict_raw</code> writes raw scores into a caller’s buffer.</dd>
+      <dt><code>Kernel</code>, <code>Predictor::with_kernel(&amp;model, kernel)</code>, <code>available_kernels()</code></dt>
+      <dd><code>neon</code>, <code>avx2</code>, <code>avx512</code> or <code>portable</code>. <code>Kernel::detect</code> picks NEON on aarch64 and AVX2 on x86-64 that has it, else the portable kernel.</dd>
+    </dl>
+    <p class="also"><b>Also public</b> <code>predictor.kernel</code>, <code>predictor.num_trees()</code>, <code>predictor.num_feature()</code>, <code>Predictor::num_walked_trees</code>.</p>
+
+    <h2>How it scores</h2>
+    <p>Each tree is QuickScorer’s leaf bitvector (Lucchese et al., SIGIR 2015): leaves are numbered left to right, each node clears its left subtree’s bits in the rows that go right, and the lowest bit left is the exit leaf, so no branch depends on the data. Rows are scored 64 at a time, one SIMD byte lane per row, with each tree’s bitvectors sliced into bytes across the lanes, as in RapidScorer (Ye et al., KDD 2018). Before that, each value becomes a byte: its rank among the split thresholds of its feature, found by a branchless binary search over all lanes at once, so every split is a byte compare. Leaf values are added per row in tree order, in f64, as LightGBM adds them.</p>
+    <p>NaN and zero take the codes left or right of every threshold that LightGBM’s missing-value handling and <code>default_left</code> send them to, and values within <code>kZeroThreshold</code> of zero read as zero, as in LightGBM’s dense reader. Categories that every split treats alike share a class, and a categorical split is a 64-byte table; NaN, negative and unseen categories go right.</p>
+    <p>Trees of more than 256 leaves, a NaN threshold, or a categorical feature with more than 64 distinct category behaviours are walked node by node with <code>silvic-core</code>’s decisions instead: every model <code>silvic-core</code> reads scores, those trees at LightGBM’s speed.</p>
+
+    <h2>Kernels</h2>
+    <dl class="manifest">
+      <dt><code>neon</code> <span class="default">aarch64</span></dt>
+      <dd>64 rows per block. Timed above.</dd>
+      <dt><code>avx2</code> <span class="default">x86-64</span></dt>
+      <dd>64 rows per block. Its tests pass under Rosetta 2; its speed on x86 is not yet measured.</dd>
+      <dt><code>avx512</code></dt>
+      <dd>Compiles but has not run on AVX-512 hardware, so it is used only when asked for by name.</dd>
+      <dt><code>portable</code></dt>
+      <dd>Plain Rust, eight byte lanes to a u64 word, 32 rows per block: 37.5 ms for the batch above.</dd>
+    </dl>
+    <p>Every kernel gives the same predictions, tested bit for bit against LightGBM 3.3.5 and 4.7’s own predictions and against <code>silvic-core</code> on random forests, at every threshold and its neighbouring doubles, NaN, ±0, ±<code>kZeroThreshold</code> and ±inf.</p>
+
+    <nav class="onward" aria-label="Crates">
+      <a href="silvic-net.html">← <code>silvic-net</code></a>
+      <a class="next" href="silvic-triton.html"><code>silvic-triton</code> →</a>
+    </nav>
+  </main>
+  <script src="../mark.js"></script>
+</body>
+</html>
