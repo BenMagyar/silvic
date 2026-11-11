@@ -31,7 +31,6 @@
     <nav class="how-topics" aria-label="How sections">
       <a href="#training">Training</a>
       <a href="#serving">Serving</a>
-      <a href="how-diagrams.html">Diagram options</a>
     </nav>
 
     <h1>How it works</h1>
@@ -39,7 +38,7 @@
       <h2 id="training">Training</h2>
       <p>LightGBM and silvic both recover a sibling histogram by subtracting a built child’s histogram from its parent’s. LightGBM defaults to separate floating-point gradient and hessian sums. silvic’s CPU path quantizes and packs each pair into an integer, so one addition updates both sums in a bin. This reduces bin-update work; the <a href="./#training">training benchmark</a> also includes binning, fitting and validation.</p>
       <figure class="how-visual">
-        <img src="how-training-flow.svg" alt="For a row and feature bin, LightGBM's default accumulates gradient and hessian values separately. silvic quantizes and packs the pair before one integer histogram addition." width="360" height="300">
+        <img src="how-training-packing.svg" alt="For a row and feature bin, LightGBM's default accumulates gradient and hessian values separately. silvic quantizes and packs the pair before one integer histogram addition." width="360" height="300">
         <figcaption>Quantizing and packing the gradient–hessian pair lets silvic update a histogram bin with one integer addition, compared with two separate accumulations in LightGBM’s default.</figcaption>
       </figure>
     </section>
